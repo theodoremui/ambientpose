@@ -48,14 +48,14 @@ AlphaDetect supports multiple pose estimation engines, automatically selecting t
 ## 4  System Architecture
 
 ```
-┌────────────┐  HTTPS/WS  ┌─────────────┐  asyncio/pipe  ┌─────────────┐
+┌────────────┐  HTTPS/WS   ┌──────────────┐  asyncio/pipe   ┌─────────────┐
 │  Frontend  │◀──────────▶│   FastAPI    │◀──────────────▶│ detect.py   │
-│  Next.js   │            │    API       │   stdio/json   │ (AlphaPose/ │
-│            │            │              │                │  MediaPipe/ │
-│            │            │              │                │  YOLO)      │
-└────────────┘            └─────────────┘                └─────────────┘
-               ▲                                       │
-               └──────────────  outputs/  ─────────────┘
+│  Next.js   │             │    API       │   stdio/json    │ (AlphaPose/ │
+│            │             │              │                 │  MediaPipe/ │
+│            │             │              │                 │  YOLO)      │
+└────────────┘             └──────────────┘                 └─────────────┘
+        ▲                                                          │
+        └────────────────────  outputs/  ──────────────────────────┘
 ```
 
 All artefacts live under `outputs/<taskId>/` for easy browsing and download.
