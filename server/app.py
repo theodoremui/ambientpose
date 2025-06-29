@@ -1,11 +1,11 @@
 """
-AlphaDetect Server - FastAPI Backend
+AmbientPose Server - FastAPI Backend
 
-This module provides a FastAPI application that serves as the backend for the AlphaDetect
+This module provides a FastAPI application that serves as the backend for the AmbientPose
 pose detection system. It handles file uploads, task execution, status tracking, and
 file serving.
 
-Author: AlphaDetect Team
+Author: AmbientPose Team
 Date: 2025-06-21
 """
 
@@ -64,7 +64,7 @@ class Settings:
     """Application settings loaded from environment variables."""
     
     # Base settings
-    APP_NAME: str = "AlphaDetect API"
+    APP_NAME: str = "AmbientPose API"
     APP_VERSION: str = "0.1.0"
     APP_DESCRIPTION: str = "API for human pose detection using AlphaPose"
     
@@ -74,13 +74,13 @@ class Settings:
     MAX_UPLOAD_SIZE_MB: int = int(os.getenv("ALPHADETECT_MAX_UPLOAD_MB", "4096"))
     
     # Database
-    DB_URL: str = os.getenv("ALPHADETECT_DB_URL", "sqlite:///./alphadetect.db")
+    DB_URL: str = os.getenv("ALPHADETECT_DB_URL", "sqlite:///./ambientpose.db")
     
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",  # Frontend dev server
         "http://localhost:8000",  # Backend dev server
-        "https://alphadetect.example.com",  # Production
+        "https://ambientpose.example.com",  # Production
     ]
     
     # CLI
@@ -533,7 +533,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup_event():
     """Run startup tasks."""
-    logger.info("Starting up AlphaDetect API")
+    logger.info("Starting up AmbientPose API")
     
     # Create database tables
     SQLModel.metadata.create_all(engine)
@@ -545,19 +545,19 @@ async def startup_event():
     logger.info(f"Storage directory: {settings.STORAGE_DIR}")
     logger.info(f"Upload directory: {settings.UPLOAD_DIR}")
     logger.info(f"CLI path: {settings.CLI_PATH}")
-    logger.info("AlphaDetect API started successfully")
+    logger.info("AmbientPose API started successfully")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run shutdown tasks."""
-    logger.info("Shutting down AlphaDetect API")
+    logger.info("Shutting down AmbientPose API")
     
     # Close database connection
     if engine:
         engine.dispose()
     
-    logger.info("AlphaDetect API shut down successfully")
+    logger.info("AmbientPose API shut down successfully")
 
 
 # Health check endpoint

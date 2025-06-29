@@ -8,7 +8,7 @@ Due to AlphaPose's complex build-time dependencies, it requires special handling
 Usage:
     python scripts/install_alphapose.py
 
-Author: AlphaDetect Team
+Author: AmbientPose Team
 Date: 2025-06-22
 """
 

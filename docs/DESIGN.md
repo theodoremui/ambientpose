@@ -1,4 +1,4 @@
-# AlphaDetect – Design Document
+# AmbientPose – Design Document
 
 *Document version: 1.0 – 2025-06-21*
 
@@ -6,7 +6,7 @@
 
 ## 1. System Architecture Overview
 
-AlphaDetect is a three–tier system:
+AmbientPose is a three–tier system:
 
 | Layer     | Technology                                           | Responsibility                                      |
 |-----------|-------------------------------------------------------|-----------------------------------------------------|
@@ -192,9 +192,9 @@ npm run dev --prefix frontend  # ui
 ### 11.2 Production (Kubernetes)
 
 ```text
-alphadetect-frontend   Deployment (replicas=3)  —> Cloud CDN
-alphadetect-api        Deployment (replicas=3)  —> HPA CPU=60%
-alphadetect-worker     Job per task / GPU node  —> NodeSelector nvidia.com/gpu.present
+ambientpose-frontend   Deployment (replicas=3)  —> Cloud CDN
+ambientpose-api        Deployment (replicas=3)  —> HPA CPU=60%
+ambientpose-worker     Job per task / GPU node  —> NodeSelector nvidia.com/gpu.present
 postgres               StatefulSet
 minio                  StatefulSet (optional)
 ingress-nginx → TLS via cert-manager

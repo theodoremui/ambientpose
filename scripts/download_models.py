@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download Pretrained Models for AlphaDetect
+Download Pretrained Models for AmbientPose
 
 This script downloads pretrained models for AlphaPose pose detection.
 Ultralytics and MediaPipe models are downloaded automatically when needed.
@@ -8,7 +8,7 @@ Ultralytics and MediaPipe models are downloaded automatically when needed.
 Usage:
     python scripts/download_models.py [--all] [--fast-only]
     
-Author: AlphaDetect Team
+Author: AmbientPose Team
 Date: 2025-01-16
 """
 
@@ -192,7 +192,7 @@ def download_models(model_names: List[str] = None, fast_only: bool = False) -> b
         # Download all models, sorted by priority
         model_names = sorted(models.keys(), key=lambda x: models[x]["priority"])
     
-    print("🚀 AlphaDetect Model Downloader")
+    print("🚀 AmbientPose Model Downloader")
     print("=" * 50)
     
     # Check what needs to be downloaded
@@ -283,7 +283,7 @@ def list_models():
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Download pretrained models for AlphaDetect",
+        description="Download pretrained models for AmbientPose",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     

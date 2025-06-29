@@ -91,8 +91,8 @@ except ImportError as e:
     logger.warning(f"AlphaPose not available: {e}")
 
 
-class AlphaDetectConfig:
-    """Configuration for AlphaDetect CLI."""
+class AmbientPoseConfig:
+    """Configuration for AmbientPose CLI."""
     
     # Default paths
     DEFAULT_OUTPUT_DIR = Path("outputs")
@@ -148,7 +148,7 @@ class AlphaDetectConfig:
 class MediaPipeDetector:
     """MediaPipe-based pose detector."""
     
-    def __init__(self, config: AlphaDetectConfig):
+    def __init__(self, config: AmbientPoseConfig):
         """Initialize MediaPipe pose detector."""
         if not MEDIAPIPE_AVAILABLE:
             raise ImportError("MediaPipe is not available")
@@ -279,7 +279,7 @@ class MediaPipeDetector:
 class UltralyticsDetector:
     """Ultralytics YOLO-based pose detector."""
     
-    def __init__(self, config: AlphaDetectConfig):
+    def __init__(self, config: AmbientPoseConfig):
         """Initialize Ultralytics YOLO pose detector."""
         if not ULTRALYTICS_AVAILABLE:
             raise ImportError("Ultralytics YOLO is not available")
@@ -423,7 +423,7 @@ class UltralyticsDetector:
 class AlphaPoseDetector:
     """AlphaPose-based pose detector using official DetectionLoader pipeline."""
     
-    def __init__(self, config: AlphaDetectConfig):
+    def __init__(self, config: AmbientPoseConfig):
         """Initialize AlphaPose detector."""
         if not ALPHAPOSE_AVAILABLE:
             raise ImportError("AlphaPose is not available")
@@ -1118,7 +1118,7 @@ def convert_pose_to_joints_format(pose: Dict[str, Any], frame_number: int, times
 class PoseDetector:
     """Main pose detector that manages different backends."""
     
-    def __init__(self, config: AlphaDetectConfig):
+    def __init__(self, config: AmbientPoseConfig):
         """Initialize the pose detector with the best available backend."""
         self.config = config
         self.detector = None
@@ -1463,7 +1463,7 @@ class PoseDetector:
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description='AlphaDetect: Multi-backend pose detection tool',
+        description='AmbientPose: Multi-backend pose detection tool',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
@@ -1507,7 +1507,7 @@ def main() -> int:
             return 1
         
         # Initialize configuration
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         # Initialize pose detector
         detector = PoseDetector(config)

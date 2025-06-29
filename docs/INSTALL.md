@@ -1,13 +1,13 @@
-# AlphaDetect – Installation Guide
+# AmbientPose – Installation Guide
 
 *Last updated: 2025-06-21*
 
-This document walks you through installing **AlphaDetect** on macOS / Linux / Windows, from prerequisites to production-ready deployments. Follow the steps sequentially or jump to the section that matches your needs.
+This document walks you through installing **AmbientPose** on macOS / Linux / Windows, from prerequisites to production-ready deployments. Follow the steps sequentially or jump to the section that matches your needs.
 
 ---
 
 ## Table of Contents
-- [AlphaDetect – Installation Guide](#alphadetect--installation-guide)
+- [AmbientPose – Installation Guide](#ambientpose--installation-guide)
   - [Table of Contents](#table-of-contents)
   - [1. System Requirements](#1-system-requirements)
   - [2. Prerequisites Installation](#2-prerequisites-installation)
@@ -74,7 +74,7 @@ This document walks you through installing **AlphaDetect** on macOS / Linux / Wi
 | **Node.js** | 18 | 20 |
 | **Git** | 2.34 | latest |
 
-> AlphaDetect _runs on CPU_, but real-time performance requires a CUDA-capable GPU.
+> AmbientPose _runs on CPU_, but real-time performance requires a CUDA-capable GPU.
 
 ---
 
@@ -117,11 +117,11 @@ pyenv local 3.12
 
 ## 3. AlphaPose Setup and Configuration
 
-AlphaDetect vendors AlphaPose as a Git submodule for reproducibility.
+AmbientPose vendors AlphaPose as a Git submodule for reproducibility.
 
 ```bash
-git clone --recurse-submodules https://github.com/philmui/alphadetect.git
-cd alphadetect
+git clone --recurse-submodules https://github.com/philmui/ambientpose.git
+cd ambientpose
 # OR, if you cloned previously without submodules:
 git submodule update --init --recursive
 ```
@@ -170,7 +170,7 @@ From the repo root:
 # ① create .venv (Python version read from .python-version if present)
 uv venv
 
-# ② install AlphaDetect core + dev extras
+# ② install AmbientPose core + dev extras
 uv pip install -e ".[dev]"
 
 # (optional) GPU wheels
@@ -243,7 +243,7 @@ Important env vars (defaults are `.env.example`):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ALPHADETECT_STORAGE_DIR` | Where outputs are written | `./outputs` |
-| `ALPHADETECT_DB_URL` | SQLModel connection string | `sqlite:///./alphadetect.db` |
+| `ALPHADETECT_DB_URL` | SQLModel connection string | `sqlite:///./ambientpose.db` |
 | `ALPHADETECT_MAX_UPLOAD_MB` | File size cap | `4096` |
 
 ---
@@ -256,7 +256,7 @@ SQLite is used for local dev; no manual steps needed.
 
 ```bash
 docker run -d --name pg -e POSTGRES_PASSWORD=secret -p 5432:5432 postgres:16
-export ALPHADETECT_DB_URL=postgresql+psycopg://postgres:secret@localhost:5432/alphadetect
+export ALPHADETECT_DB_URL=postgresql+psycopg://postgres:secret@localhost:5432/ambientpose
 python -m server.migrations upgrade head
 ```
 
@@ -278,7 +278,7 @@ Ensure the **SMPL** file (`basicModel_neutral_lbs_10_207_0_v1.0.0.pkl`) is place
 
 ## 9. Configuration Options
 
-Edit `configs/default.yaml` (copied to `~/.alphadetect.yaml` on first run):
+Edit `configs/default.yaml` (copied to `~/.ambientpose.yaml` on first run):
 
 ```yaml
 detector: yolox-x
@@ -340,8 +340,8 @@ GPU: `docker compose --profile gpu up` (requires NVIDIA Container Runtime).
 To produce a lean production image:
 
 ```bash
-docker build -t alphadetect-api -f server/Dockerfile.prod .
-docker run -d -p 8000:8000 --gpus all alphadetect-api
+docker build -t ambientpose-api -f server/Dockerfile.prod .
+docker run -d -p 8000:8000 --gpus all ambientpose-api
 ```
 
 ---
@@ -432,7 +432,7 @@ make install-pose-alternatives
 
 If you continue to experience issues:
 
-1. Check the [GitHub Issues](https://github.com/your-repo/alphadetect/issues)
+1. Check the [GitHub Issues](https://github.com/your-repo/ambientpose/issues)
 2. Run `make install-pose-alternatives` for a more reliable setup
 3. Use Docker installation as a fallback option
 
@@ -487,7 +487,7 @@ open http://localhost:8000/docs
 
 ### Overview
 
-The AlphaDetect CLI now supports multiple pose detection backends for maximum compatibility and performance:
+The AmbientPose CLI now supports multiple pose detection backends for maximum compatibility and performance:
 
 - **MediaPipe**: Google's cross-platform pose detection (primary, most reliable)
 - **Ultralytics YOLO**: Modern YOLOv8-based pose detection (alternative)

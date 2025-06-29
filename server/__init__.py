@@ -1,12 +1,12 @@
 """
-AlphaDetect Server Package
+AmbientPose Server Package
 
-This package provides a FastAPI backend for the AlphaDetect pose detection system.
+This package provides a FastAPI backend for the AmbientPose pose detection system.
 It handles file uploads, task execution via the CLI, status tracking, and file serving.
 """
 
 __version__ = "0.1.0"
-__author__ = "AlphaDetect Team"
+__author__ = "AmbientPose Team"
 __description__ = "FastAPI backend for human pose detection using AlphaPose"
 
 # Import key components to make them available at the package level

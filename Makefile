@@ -1,5 +1,5 @@
-# AlphaDetect - Comprehensive Makefile
-# This Makefile provides targets for all aspects of the AlphaDetect project lifecycle
+# AmbientPose - Comprehensive Makefile
+# This Makefile provides targets for all aspects of the AmbientPose project lifecycle
 
 # ===== CONFIGURATION VARIABLES =====
 SHELL := /bin/bash
@@ -43,7 +43,7 @@ POSE_MODEL_URL := https://github.com/MVIG-SJTU/AlphaPose/releases/download/v0.5.
 SMPL_MODEL_URL := https://download.is.tue.mpg.de/download.php?domain=smpl&sfile=basicModel_neutral_lbs_10_207_0_v1.0.0.pkl
 
 # Database settings
-DB_FILE := alphadetect.db
+DB_FILE := ambientpose.db
 MIGRATIONS_DIR := $(SERVER_DIR)/migrations
 
 # ===== PHONY TARGETS =====
@@ -63,7 +63,7 @@ MIGRATIONS_DIR := $(SERVER_DIR)/migrations
 
 # ===== HELP TARGET =====
 help:
-	@echo "AlphaDetect Makefile Help"
+	@echo "AmbientPose Makefile Help"
 	@echo "=========================="
 	@echo ""
 	@echo "Setup and Installation:"

@@ -2,13 +2,13 @@
 """
 AlphaPose Environment Setup Script
 
-This script helps set up the environment for AlphaPose integration with AlphaDetect.
+This script helps set up the environment for AlphaPose integration with AmbientPose.
 It creates the .env file and verifies the AlphaPose installation.
 
 Usage:
     python scripts/setup_alphapose_env.py
     
-Author: AlphaDetect Team
+Author: AmbientPose Team
 Date: 2025-01-16
 """
 
@@ -203,7 +203,7 @@ def setup_cuda_environment():
 
 def main():
     """Main setup function."""
-    print("🚀 AlphaPose Environment Setup for AlphaDetect")
+    print("🚀 AlphaPose Environment Setup for AmbientPose")
     print("=" * 50)
     
     success = True

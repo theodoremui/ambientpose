@@ -1,6 +1,6 @@
 # Using `uv` for Python Package Management in AmbientPose
 
-This document provides a comprehensive guide to setting up and using `uv`, the extremely fast Python package installer and resolver, for the AlphaDetect project. `uv` is used to manage virtual environments and dependencies, replacing traditional tools like `pip` and `venv`.
+This document provides a comprehensive guide to setting up and using `uv`, the extremely fast Python package installer and resolver, for the AmbientPose project. `uv` is used to manage virtual environments and dependencies, replacing traditional tools like `pip` and `venv`.
 
 ---
 
@@ -9,7 +9,7 @@ This document provides a comprehensive guide to setting up and using `uv`, the e
 1.  [Why `uv`?](#1-why-uv)
 2.  [Installation](#2-installation)
 3.  [Core Concepts](#3-core-concepts)
-4.  [Setting Up the AlphaDetect Project](#4-setting-up-the-alphadetect-project)
+4.  [Setting Up the AmbientPose Project](#4-setting-up-the-ambientpose-project)
 5.  [Daily Development Workflow](#5-daily-development-workflow)
     - [Viewing Installed Packages](#viewing-installed-packages)
     - [Adding a Dependency](#adding-a-dependency)
@@ -30,7 +30,7 @@ The AmbientPose project uses `uv` for its Python environment and package managem
 -   **Modern Foundation**: It leverages modern Python packaging standards (PEP 517/518) and `pyproject.toml`.
 -   **Reproducibility**: `uv` makes creating and maintaining lock files for reproducible builds straightforward.
 
-> **AlphaDetect convention**  
+> **AmbientPose convention**  
 > * `pyproject.toml` is the **single source-of-truth** for all direct
 >   dependencies.  
 > * `requirements.txt` is **auto-generated** (via
@@ -71,15 +71,15 @@ uv --version
     fully-pinned `requirements.txt`** lock file.
 -   `uv run`: Runs a command within the managed virtual environment without needing to activate it first.
 
-## 4. Setting Up the AlphaDetect Project
+## 4. Setting Up the AmbientPose Project
 
-Follow these steps to set up your local development environment for AlphaDetect using `uv`.
+Follow these steps to set up your local development environment for AmbientPose using `uv`.
 
 **Step 1: Clone the Repository**
 
 ```bash
-git clone https://github.com/your-org/alphadetect.git
-cd alphadetect
+git clone https://github.com/your-org/ambientpose.git
+cd ambientpose
 ```
 
 **Step 2: Create the Virtual Environment**
@@ -102,7 +102,7 @@ source .venv/bin/activate
 
 **Step 3: Install Dependencies**
 
-Install all project dependencies, including the optional `dev` and `test` groups, directly from `pyproject.toml`. The `-e` flag installs the `alphadetect` project in "editable" mode.
+Install all project dependencies, including the optional `dev` and `test` groups, directly from `pyproject.toml`. The `-e` flag installs the `ambientpose` project in "editable" mode.
 
 ```bash
 uv pip install -e ".[dev,test]"
@@ -132,7 +132,7 @@ Your environment is now fully set up and ready for development.
 
 ## 5. Daily Development Workflow
 
-Here’s how to manage dependencies during your day-to-day work on AlphaDetect.
+Here’s how to manage dependencies during your day-to-day work on AmbientPose.
 
 ### Viewing Installed Packages
 
@@ -215,7 +215,7 @@ While activating the virtual environment with `source .venv/bin/activate` is com
 uv run pytest
 
 # Run the CLI without activating the venv
-uv run alphadetect-detect --video path/to/video.mp4
+uv run ambientpose-detect --video path/to/video.mp4
 ```
 
 This is particularly useful for one-off commands or in scripts where activation can be cumbersome.
@@ -245,4 +245,4 @@ This is particularly useful for one-off commands or in scripts where activation 
 
 ---
 
-By following this guide, you can leverage the full power of `uv` to maintain a fast, clean, and reproducible development environment for the AlphaDetect project.
+By following this guide, you can leverage the full power of `uv` to maintain a fast, clean, and reproducible development environment for the AmbientPose project.

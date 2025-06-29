@@ -53,7 +53,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     const { error } = this.state
     const errorMessage = encodeURIComponent(error?.message || 'Unknown error')
     const errorStack = encodeURIComponent(error?.stack || '')
-    const issueUrl = `https://github.com/your-org/alphadetect/issues/new?title=Error: ${errorMessage}&body=Error Stack:%0A${errorStack}%0A%0ASteps to reproduce:%0A1.%20`
+    const issueUrl = `https://github.com/your-org/ambientpose/issues/new?title=Error: ${errorMessage}&body=Error Stack:%0A${errorStack}%0A%0ASteps to reproduce:%0A1.%20`
     
     window.open(issueUrl, '_blank')
   }

@@ -5,12 +5,12 @@
 > 2025
 
 **Modern end-to-end human-pose detection platform powered by [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), MediaPipe, and Ultralytics YOLO.**  
-AlphaDetect offers a production-ready CLI, an asynchronous FastAPI backend, and a sleek Next.js/Tailwind frontend that work together to transform videos or image sequences into rich pose-estimation data and visualisations.
+AmbientPose offers a production-ready CLI, an asynchronous FastAPI backend, and a sleek Next.js/Tailwind frontend that work together to transform videos or image sequences into rich pose-estimation data and visualisations.
 
 ---
 
 ## 1  Project Overview
-AlphaDetect is designed for researchers, engineers, and creators to extract accurate multi-person, whole-body joint positions from media with minimal effort. It wraps state-of-the-art pose engines in a highly-extensible micro-service architecture, delivering:
+AmbientPose is designed for researchers, engineers, and creators to extract accurate multi-person, whole-body joint positions from media with minimal effort. It wraps state-of-the-art pose engines in a highly-extensible micro-service architecture, delivering:
 
 * **Batch & real-time inference** from the command line or REST/WebSocket API  
 * **Interactive web UI** for project management, uploads, and result exploration  
@@ -35,7 +35,7 @@ AlphaDetect is designed for researchers, engineers, and creators to extract accu
 ---
 
 ## 3  Supported Backends
-AlphaDetect supports multiple pose estimation engines, automatically selecting the best available or letting you choose:
+AmbientPose supports multiple pose estimation engines, automatically selecting the best available or letting you choose:
 
 - **AlphaPose**: State-of-the-art, 136-keypoint, multi-person, tracking, best accuracy, GPU/CPU, optional 3D pose.
 - **MediaPipe**: Fast, reliable, CPU-friendly, ideal for quick or resource-limited jobs.
@@ -65,8 +65,8 @@ All artefacts live under `outputs/<taskId>/` for easy browsing and download.
 ## 5  Quick-Start (Local)
 
 ```bash
-git clone https://github.com/your-org/alphadetect.git
-cd alphadetect
+git clone https://github.com/your-org/ambientpose.git
+cd ambientpose
 
 # ①  Python env & deps  (powered by ultra-fast "uv")
 uv venv                                # creates .venv using the Python in .python-version
@@ -180,7 +180,7 @@ Read `docs/CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` for details.
 
 ## 12  License
 
-AlphaDetect is licensed under the **MIT License** – see [`LICENSE`](LICENSE).  
+AmbientPose is licensed under the **MIT License** – see [`LICENSE`](LICENSE).  
 Note: AlphaPose models are released for **non-commercial research**; commercial usage may require separate permission from the original authors.
 
 ---
@@ -190,5 +190,5 @@ Note: AlphaPose models are released for **non-commercial research**; commercial 
 * **AlphaPose Team** – for the cutting-edge pose engine powering this project  
 * **FastAPI**, **Next.js**, **Tailwind CSS** – for their exceptional open-source tooling  
 
-> Made with passion by the AlphaDetect engineering team.  
+> Made with passion by the AmbientPose engineering team.  
 > To contact the team, please send email to: Theodore Mui <theodoremui@gmail.com>

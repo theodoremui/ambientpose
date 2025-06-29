@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Test suite for AlphaDetect CLI (cli/detect.py)
+Test suite for AmbientPose CLI (cli/detect.py)
 
-This module contains comprehensive tests for the AlphaDetect CLI component,
+This module contains comprehensive tests for the AmbientPose CLI component,
 including unit tests, integration tests, and mock-based tests to validate
 the functionality of the pose detection pipeline.
 
-Author: AlphaDetect Team
+Author: AmbientPose Team
 Date: 2025-06-21
 """
 
@@ -29,7 +29,7 @@ from loguru import logger
 
 # Import CLI modules
 from cli.detect import (
-    AlphaDetectConfig,
+    AmbientPoseConfig,
     PoseDetector,
     main,
     parse_args,
@@ -393,7 +393,7 @@ class TestConfigurationValidation:
             pose_batch_size=80
         )
         
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         assert config.input_path == test_video_path
         assert config.is_video is True
@@ -428,7 +428,7 @@ class TestConfigurationValidation:
             pose_batch_size=80
         )
         
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         assert config.input_path == test_image_dir
         assert config.is_video is False
@@ -455,7 +455,7 @@ class TestConfigurationValidation:
             pose_batch_size=80
         )
         
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         assert config.output_json == custom_output
     
@@ -479,7 +479,7 @@ class TestConfigurationValidation:
         )
         
         with pytest.raises(FileNotFoundError, match="Input path does not exist"):
-            AlphaDetectConfig(args)
+            AmbientPoseConfig(args)
     
     def test_config_validation_missing_config(self, test_video_path, output_dir, mock_checkpoint_file):
         """Test configuration validation with missing config file."""
@@ -501,7 +501,7 @@ class TestConfigurationValidation:
         )
         
         with pytest.raises(FileNotFoundError, match="Config file does not exist"):
-            AlphaDetectConfig(args)
+            AmbientPoseConfig(args)
     
     def test_config_validation_missing_checkpoint(self, test_video_path, output_dir, mock_config_file):
         """Test configuration validation with missing checkpoint file."""
@@ -523,7 +523,7 @@ class TestConfigurationValidation:
         )
         
         with pytest.raises(FileNotFoundError, match="Checkpoint file does not exist"):
-            AlphaDetectConfig(args)
+            AmbientPoseConfig(args)
     
     @patch('os.access')
     def test_config_validation_unwritable_output(self, mock_access, test_video_path, output_dir, mock_config_file, mock_checkpoint_file):
@@ -548,7 +548,7 @@ class TestConfigurationValidation:
         )
         
         with pytest.raises(PermissionError, match="Output directory is not writable"):
-            AlphaDetectConfig(args)
+            AmbientPoseConfig(args)
 
 
 class TestPoseDetector:
@@ -583,7 +583,7 @@ class TestPoseDetector:
             detector_batch_size=1,
             pose_batch_size=80
         )
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         # Initialize detector
         with patch('cli.detect.YoloxDetector') as mock_yolox:
@@ -639,7 +639,7 @@ class TestPoseDetector:
             detector_batch_size=1,
             pose_batch_size=80
         )
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         # Initialize detector with mocks
         detector = Mock()
@@ -679,7 +679,7 @@ class TestPoseDetector:
             detector_batch_size=1,
             pose_batch_size=80
         )
-        config = AlphaDetectConfig(args)
+        config = AmbientPoseConfig(args)
         
         # Initialize detector with mocks
         detector = Mock()
@@ -932,7 +932,7 @@ def test_detector_types(detector_type, test_video_path, output_dir, mock_config_
     )
     
     # Initialize configuration
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     assert config.detector == detector_type
     
     # Mock detector initialization
@@ -977,7 +977,7 @@ def test_tracking_options(track_option, test_video_path, output_dir, mock_config
     )
     
     # Initialize configuration
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     assert config.track == track
     assert config.pose_track == pose_track
 
@@ -1008,7 +1008,7 @@ def test_gpu_options(gpu_option, test_video_path, output_dir, mock_config_file, 
     )
     
     # Initialize configuration
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     
     # Check device setting
     if gpu_option == [-1] or not torch.cuda.is_available():
@@ -1040,7 +1040,7 @@ def test_video_open_error(test_video_path, output_dir, mock_config_file, mock_ch
         detector_batch_size=1,
         pose_batch_size=80
     )
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     
     # Initialize detector with mocks
     detector = Mock()
@@ -1080,7 +1080,7 @@ def test_empty_image_directory(output_dir, mock_config_file, mock_checkpoint_fil
         detector_batch_size=1,
         pose_batch_size=80
     )
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     
     # Initialize detector with mocks
     detector = Mock()
@@ -1110,7 +1110,7 @@ def test_detector_import_error(test_video_path, output_dir, mock_config_file, mo
         detector_batch_size=1,
         pose_batch_size=80
     )
-    config = AlphaDetectConfig(args)
+    config = AmbientPoseConfig(args)
     
     # Mock dependencies
     with patch('cli.detect.update_config', return_value=Mock()):

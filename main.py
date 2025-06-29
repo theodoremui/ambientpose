@@ -1,5 +1,5 @@
 def main():
-    print("Hello from alphadetect!")
+    print("Hello from ambientpose!")
 
 
 if __name__ == "__main__":

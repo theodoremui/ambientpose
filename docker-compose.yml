@@ -1,7 +1,7 @@
 version: '3.8'
 
-# AlphaDetect - Docker Compose Configuration
-# This file defines the multi-container setup for AlphaDetect with development and production profiles
+# AmbientPose - Docker Compose Configuration
+# This file defines the multi-container setup for AmbientPose with development and production profiles
 # Usage:
 #   Development: docker compose up
 #   Production:  docker compose --profile prod up
@@ -16,8 +16,8 @@ services:
       context: .
       dockerfile: ./docker/api.Dockerfile
       target: ${DOCKER_TARGET:-development}
-    image: alphadetect/api:${TAG:-latest}
-    container_name: alphadetect-api
+    image: ambientpose/api:${TAG:-latest}
+    container_name: ambientpose-api
     restart: unless-stopped
     depends_on:
       postgres:
@@ -25,7 +25,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-alphadetect}@postgres:5432/alphadetect
+      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-ambientpose}@postgres:5432/ambientpose
       - ALPHADETECT_STORAGE_DIR=/data/outputs
       - ALPHADETECT_UPLOAD_DIR=/data/uploads
       - ALPHADETECT_MAX_UPLOAD_MB=4096
@@ -45,7 +45,7 @@ services:
       retries: 3
       start_period: 10s
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default", "prod"]
 
   #############################################
@@ -56,8 +56,8 @@ services:
       context: .
       dockerfile: ./docker/worker.Dockerfile
       target: ${DOCKER_TARGET:-development}
-    image: alphadetect/worker:${TAG:-latest}
-    container_name: alphadetect-worker
+    image: ambientpose/worker:${TAG:-latest}
+    container_name: ambientpose-worker
     restart: unless-stopped
     depends_on:
       postgres:
@@ -65,7 +65,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-alphadetect}@postgres:5432/alphadetect
+      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-ambientpose}@postgres:5432/ambientpose
       - ALPHADETECT_STORAGE_DIR=/data/outputs
       - ALPHADETECT_UPLOAD_DIR=/data/uploads
       - ALPHADETECT_REDIS_URL=redis://redis:6379/0
@@ -84,7 +84,7 @@ services:
               count: 1
               capabilities: [gpu]
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["gpu"]
 
   #############################################
@@ -95,8 +95,8 @@ services:
       context: ./frontend
       dockerfile: ../docker/frontend.Dockerfile
       target: ${DOCKER_TARGET:-development}
-    image: alphadetect/frontend:${TAG:-latest}
-    container_name: alphadetect-frontend
+    image: ambientpose/frontend:${TAG:-latest}
+    container_name: ambientpose-frontend
     restart: unless-stopped
     environment:
       - NODE_ENV=${NODE_ENV:-development}
@@ -106,7 +106,7 @@ services:
       - /app/node_modules
       - /app/.next
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default", "prod"]
     # In development mode, we use the Next.js dev server
     # In production, this is built and served via nginx
@@ -117,12 +117,12 @@ services:
   #############################################
   postgres:
     image: postgres:16-alpine
-    container_name: alphadetect-postgres
+    container_name: ambientpose-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-alphadetect}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ambientpose}
       - POSTGRES_USER=postgres
-      - POSTGRES_DB=alphadetect
+      - POSTGRES_DB=ambientpose
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -133,7 +133,7 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default", "prod", "gpu"]
 
   #############################################
@@ -141,9 +141,9 @@ services:
   #############################################
   redis:
     image: redis:7-alpine
-    container_name: alphadetect-redis
+    container_name: ambientpose-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-alphadetect}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-ambientpose}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -152,7 +152,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default", "prod", "gpu"]
 
   #############################################
@@ -160,7 +160,7 @@ services:
   #############################################
   nginx:
     image: nginx:alpine
-    container_name: alphadetect-nginx
+    container_name: ambientpose-nginx
     restart: unless-stopped
     depends_on:
       - api
@@ -175,7 +175,7 @@ services:
       - nginx_cache:/var/cache/nginx
       - nginx_logs:/var/log/nginx
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["prod"]
 
   #############################################
@@ -183,7 +183,7 @@ services:
   #############################################
   adminer:
     image: adminer:latest
-    container_name: alphadetect-adminer
+    container_name: ambientpose-adminer
     restart: unless-stopped
     depends_on:
       - postgres
@@ -192,28 +192,28 @@ services:
     environment:
       - ADMINER_DEFAULT_SERVER=postgres
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default"]
 
   redis-commander:
     image: rediscommander/redis-commander:latest
-    container_name: alphadetect-redis-commander
+    container_name: ambientpose-redis-commander
     restart: unless-stopped
     depends_on:
       - redis
     ports:
       - "8081:8081"
     environment:
-      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-alphadetect}
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-ambientpose}
     networks:
-      - alphadetect-network
+      - ambientpose-network
     profiles: ["default"]
 
 #############################################
 # Networks Configuration
 #############################################
 networks:
-  alphadetect-network:
+  ambientpose-network:
     driver: bridge
 
 #############################################
@@ -221,12 +221,12 @@ networks:
 #############################################
 volumes:
   postgres_data:
-    name: alphadetect-postgres-data
+    name: ambientpose-postgres-data
   redis_data:
-    name: alphadetect-redis-data
+    name: ambientpose-redis-data
   api_data:
-    name: alphadetect-api-data
+    name: ambientpose-api-data
   nginx_cache:
-    name: alphadetect-nginx-cache
+    name: ambientpose-nginx-cache
   nginx_logs:
-    name: alphadetect-nginx-logs
+    name: ambientpose-nginx-logs

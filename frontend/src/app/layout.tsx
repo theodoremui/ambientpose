@@ -25,7 +25,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AlphaDetect – Advanced Pose Detection",
+  title: "AmbientPose – Advanced Pose Detection",
   description:
     "Modern end-to-end pose-detection platform powered by AlphaPose (CLI ✦ FastAPI ✦ Next.js).",
   keywords: [
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     "FastAPI",
     "Next.js",
   ],
-  authors: [{ name: "AlphaDetect Team" }],
+  authors: [{ name: "AmbientPose Team" }],
   viewport: "width=device-width, initial-scale=1",
   icons: {
     icon: "/favicon.ico",
@@ -87,7 +87,7 @@ export default function RootLayout({
           {/* Footer */}
           <footer className="border-t bg-white py-6 dark:bg-gray-800">
             <div className="container mx-auto px-4 text-center text-sm text-gray-500 dark:text-gray-400">
-              <p>© {new Date().getFullYear()} AlphaDetect. All rights reserved.</p>
+              <p>© {new Date().getFullYear()} AmbientPose. All rights reserved.</p>
               <p className="mt-2">
                 Powered by{" "}
                 <a

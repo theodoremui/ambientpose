@@ -271,7 +271,7 @@ export default function HomePage() {
     {
       number: 3,
       title: 'Process and Analyze',
-      description: 'Let AlphaDetect process your media and view the results'
+      description: 'Let AmbientPose process your media and view the results'
     }
   ]
 

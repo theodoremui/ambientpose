@@ -1,10 +1,10 @@
-# Pretrained Model Download Guide for AlphaDetect
+# Pretrained Model Download Guide for AmbientPose
 
-This guide covers how to download and set up pretrained models for all pose detection backends supported by AlphaDetect.
+This guide covers how to download and set up pretrained models for all pose detection backends supported by AmbientPose.
 
 ## 📋 Overview
 
-AlphaDetect supports three backends, each with different model requirements:
+AmbientPose supports three backends, each with different model requirements:
 
 - **MediaPipe**: Automatic download (no setup required)
 - **Ultralytics YOLO**: Automatic download (no setup required)

@@ -63,12 +63,12 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 This approach involves modifying AlphaPose's `setup.py` to disable CUDA-dependent components, ensuring a successful build.
 
-### Step 3.1: Clone the AlphaDetect Repository
+### Step 3.1: Clone the AmbientPose Repository
 Clone the project repository. This guide assumes you are working from the project's root directory.
 
 ```bash
-git clone https://github.com/philmui/alphadetect.git
-cd alphadetect
+git clone https://github.com/philmui/ambientpose.git
+cd ambientpose
 ```
 
 ### Step 3.2: Set Up the Virtual Environment
@@ -87,7 +87,7 @@ uv pip install numpy cython
 ```
 
 ### Step 3.4: Install Core Dependencies
-Install the main dependencies for AlphaDetect. Note that the `pyproject.toml` is configured to install the correct CPU/MPS-compatible version of PyTorch on macOS.
+Install the main dependencies for AmbientPose. Note that the `pyproject.toml` is configured to install the correct CPU/MPS-compatible version of PyTorch on macOS.
 
 ```bash
 # This installs everything except AlphaPose
@@ -278,7 +278,7 @@ uv pip install opencv-python-headless==4.10.0.84
 * **AlphaPose GitHub** – <https://github.com/MVIG-SJTU/AlphaPose/issues>  
 * **PyTorch / MPS Forum** – <https://discuss.pytorch.org/c/mps>  
 * **Apple Developer Forum** – Metal & ML topics: <https://developer.apple.com/forums/>  
-* **Slack** – Join the `#alphadetect` channel in the project workspace for real-time help.  
+* **Slack** – Join the `#ambientpose` channel in the project workspace for real-time help.  
 
 Please include your **macOS version**, **Xcode CLI tools version**, full **`python -m pip list`**, and the **compiler error log** when opening issues.
 

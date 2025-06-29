@@ -79,10 +79,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage      = "https://github.com/your-org/alphadetect"
-Documentation = "https://your-org.github.io/alphadetect"
-Issues        = "https://github.com/your-org/alphadetect/issues"
-Source        = "https://github.com/your-org/alphadetect"
+Homepage      = "https://github.com/your-org/ambientpose"
+Documentation = "https://your-org.github.io/ambientpose"
+Issues        = "https://github.com/your-org/ambientpose/issues"
+Source        = "https://github.com/your-org/ambientpose"
 
 
 # --------------------------------------------------------------------
@@ -131,8 +131,8 @@ gpu = []
 # Entry points for command-line scripts
 # --------------------------------------------------------------------
 [project.scripts]
-alphadetect-detect = "cli.detect:main"
-alphadetect-server = "server.app:app"
+ambientpose-detect = "cli.detect:main"
+ambientpose-server = "server.app:app"
 
 # --------------------------------------------------------------------
 # Build-system configuration (PEP 517/518)
