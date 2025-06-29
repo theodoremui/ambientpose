@@ -1,4 +1,4 @@
-# Using `uv` for Python Package Management in AlphaDetect
+# Using `uv` for Python Package Management in AmbientPose
 
 This document provides a comprehensive guide to setting up and using `uv`, the extremely fast Python package installer and resolver, for the AlphaDetect project. `uv` is used to manage virtual environments and dependencies, replacing traditional tools like `pip` and `venv`.
 
@@ -23,7 +23,7 @@ This document provides a comprehensive guide to setting up and using `uv`, the e
 
 ## 1. Why `uv`?
 
-The AlphaDetect project uses `uv` for its Python environment and package management for several key reasons:
+The AmbientPose project uses `uv` for its Python environment and package management for several key reasons:
 
 -   **Speed**: `uv` is written in Rust and is significantly faster than `pip` and `venv`, especially when installing from a lock file or resolving complex dependency trees.
 -   **All-in-One Tool**: It combines the functionality of `pip`, `venv`, `pip-tools`, and more into a single, cohesive command-line interface.
