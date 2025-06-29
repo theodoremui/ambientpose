@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-AlphaDetect CLI - Human Pose Detection Tool
+AmbientPose CLI - Human Pose Detection Tool
 
 This tool provides pose detection capabilities using multiple backends:
 - MediaPipe (primary, most reliable)
 - Ultralytics YOLO (alternative)
 - AlphaPose (if available)
 
-Author: AlphaDetect Team
+Author: Theodore Mui
+Email: theodoremui@gmail.com
 Date: 2025-06-22
 """
 
