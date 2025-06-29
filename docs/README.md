@@ -1,14 +1,14 @@
-# AlphaDetect – Whole-Body Pose Detection System
+# AmbientPose – Whole-Body Pose Detection System
 
 ## 1. Project Overview
-AlphaDetect is an end-to-end, production-ready platform for extracting human joint positions from videos or image sequences.  
+AmbientPose is an end-to-end, production-ready platform for extracting human joint positions from videos or image sequences.  
 Built on top of [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), it combines:
 
 * A **modern Python CLI** for batch processing (`detect.py`)
 * A **FastAPI backend** for scalable, asynchronous inference services
 * A **Next.js + Tailwind/Bootstrap frontend** for intuitive project management and visualisation
 
-AlphaDetect is designed with SOLID principles, strong typing, automated tests, and rich documentation to serve research teams, computer-vision engineers, and hobbyists alike.
+AmbientPose is designed with SOLID principles, strong typing, automated tests, and rich documentation to serve research teams, computer-vision engineers, and hobbyists alike.
 
 ---
 
@@ -28,10 +28,10 @@ AlphaDetect is designed with SOLID principles, strong typing, automated tests, a
 ## 3. System Architecture
 
 ```text
-┌──────────┐     REST/WS      ┌────────────┐   asyncio/pipe   ┌───────────────┐
+┌──────────┐     REST/WS       ┌────────────┐   asyncio/pipe    ┌───────────────┐
 │ Frontend │  ◀─────────────▶ │  FastAPI   │◀────────────────▶│    detect.py  │
-│ (Next.js)│                  │   Server   │    stdio/json    │ (AlphaPose)   │
-└──────────┘                  └────────────┘                  └───────────────┘
+│ (Next.js)│                   │   Server   │    stdio/json     │               │
+└──────────┘                   └────────────┘                   └───────────────┘
          ▲                                                               │
          │                              Outputs written to /outputs/<run>│
          └───────────────────────────────────────────────────────────────┘
@@ -49,8 +49,8 @@ All components are decoupled and communicate via well-defined HTTP/JSON contract
 
 ```bash
 # 1. Clone & enter repo
-git clone https://github.com/philmui/alphadetect.git
-cd alphadetect
+git clone https://github.com/philmui/ambientpost.git
+cd ambientpost
 
 # 2. Create environment
 python -m venv .venv
@@ -145,7 +145,7 @@ curl http://localhost:8000/tasks/abc123
 ## 8. Directory Structure
 
 ```text
-alphadetect/
+ambientpost/
 ├── cli/
 │   └── detect.py
 ├── server/
@@ -180,7 +180,7 @@ Please read `CODE_OF_CONDUCT.md` before contributing.
 
 ## 10. License
 
-AlphaDetect is released under the **MIT License**.  
+AmbientPost is released under the **MIT License**.  
 See [`LICENSE`](../LICENSE) for full text.
 
 Commercial use of AlphaPose models may require additional licensing – refer to the original AlphaPose repository.
