@@ -1,4 +1,4 @@
-# AlphaDetect
+# AmbientPose
 
 > A project by Theodore Mui in collaboration with Shardul Sapkota
 > Ambient Intelligence Project in Stanford Institute for Human-centric AI.
