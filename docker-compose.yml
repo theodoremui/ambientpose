@@ -1,0 +1,232 @@
+version: '3.8'
+
+# AlphaDetect - Docker Compose Configuration
+# This file defines the multi-container setup for AlphaDetect with development and production profiles
+# Usage:
+#   Development: docker compose up
+#   Production:  docker compose --profile prod up
+#   GPU Support: docker compose --profile gpu up
+
+services:
+  #############################################
+  # Backend API Service
+  #############################################
+  api:
+    build:
+      context: .
+      dockerfile: ./docker/api.Dockerfile
+      target: ${DOCKER_TARGET:-development}
+    image: alphadetect/api:${TAG:-latest}
+    container_name: alphadetect-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-alphadetect}@postgres:5432/alphadetect
+      - ALPHADETECT_STORAGE_DIR=/data/outputs
+      - ALPHADETECT_UPLOAD_DIR=/data/uploads
+      - ALPHADETECT_MAX_UPLOAD_MB=4096
+      - ALPHADETECT_CLI_PATH=/app/cli/detect.py
+      - ALPHADETECT_REDIS_URL=redis://redis:6379/0
+      - ALPHADETECT_LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ALPHADETECT_CORS_ORIGINS=http://localhost:3000,http://frontend:3000,${ADDITIONAL_CORS:-}
+    volumes:
+      - api_data:/data
+      - ./server:/app/server:ro
+      - ./cli:/app/cli:ro
+      - ./model_files:/app/model_files:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - alphadetect-network
+    profiles: ["default", "prod"]
+
+  #############################################
+  # GPU-enabled Worker (Optional)
+  #############################################
+  worker:
+    build:
+      context: .
+      dockerfile: ./docker/worker.Dockerfile
+      target: ${DOCKER_TARGET:-development}
+    image: alphadetect/worker:${TAG:-latest}
+    container_name: alphadetect-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ALPHADETECT_DB_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-alphadetect}@postgres:5432/alphadetect
+      - ALPHADETECT_STORAGE_DIR=/data/outputs
+      - ALPHADETECT_UPLOAD_DIR=/data/uploads
+      - ALPHADETECT_REDIS_URL=redis://redis:6379/0
+      - ALPHADETECT_LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - api_data:/data
+      - ./server:/app/server:ro
+      - ./cli:/app/cli:ro
+      - ./model_files:/app/model_files:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - alphadetect-network
+    profiles: ["gpu"]
+
+  #############################################
+  # Frontend Service
+  #############################################
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend.Dockerfile
+      target: ${DOCKER_TARGET:-development}
+    image: alphadetect/frontend:${TAG:-latest}
+    container_name: alphadetect-frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - alphadetect-network
+    profiles: ["default", "prod"]
+    # In development mode, we use the Next.js dev server
+    # In production, this is built and served via nginx
+    command: ${FRONTEND_CMD:-npm run dev}
+
+  #############################################
+  # PostgreSQL Database
+  #############################################
+  postgres:
+    image: postgres:16-alpine
+    container_name: alphadetect-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-alphadetect}
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=alphadetect
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - alphadetect-network
+    profiles: ["default", "prod", "gpu"]
+
+  #############################################
+  # Redis Cache
+  #############################################
+  redis:
+    image: redis:7-alpine
+    container_name: alphadetect-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-alphadetect}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alphadetect-network
+    profiles: ["default", "prod", "gpu"]
+
+  #############################################
+  # Nginx Proxy (Production Only)
+  #############################################
+  nginx:
+    image: nginx:alpine
+    container_name: alphadetect-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_cache:/var/cache/nginx
+      - nginx_logs:/var/log/nginx
+    networks:
+      - alphadetect-network
+    profiles: ["prod"]
+
+  #############################################
+  # Development Tools
+  #############################################
+  adminer:
+    image: adminer:latest
+    container_name: alphadetect-adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+    networks:
+      - alphadetect-network
+    profiles: ["default"]
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: alphadetect-redis-commander
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-alphadetect}
+    networks:
+      - alphadetect-network
+    profiles: ["default"]
+
+#############################################
+# Networks Configuration
+#############################################
+networks:
+  alphadetect-network:
+    driver: bridge
+
+#############################################
+# Volumes Configuration
+#############################################
+volumes:
+  postgres_data:
+    name: alphadetect-postgres-data
+  redis_data:
+    name: alphadetect-redis-data
+  api_data:
+    name: alphadetect-api-data
+  nginx_cache:
+    name: alphadetect-nginx-cache
+  nginx_logs:
+    name: alphadetect-nginx-logs

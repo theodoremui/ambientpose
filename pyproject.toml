@@ -1,0 +1,150 @@
+[project]
+name = "alphadetect"
+version = "0.1.0"
+
+# --------------------------------------------------------------------
+# Project metadata
+# --------------------------------------------------------------------
+description = "AlphaDetect – End-to-end human-pose detection platform built on (CLI ✦ FastAPI ✦ Next.js)."
+readme      = "README.md"
+requires-python = ">=3.10,<3.13"
+license = "MIT"
+authors = [
+  { name = "AlphaDetect Team", email = "opensource@alphadetect.ai" },
+]
+keywords = ["pose-detection", "alphapose", "fastapi", "computer-vision", "nextjs"]
+
+# --------------------------------------------------------------------
+# Core runtime dependencies
+# All direct dependencies required for the application to run.
+# --------------------------------------------------------------------
+dependencies = [
+  # Server / API
+  "fastapi==0.110.0",
+  "uvicorn[standard]==0.29.0",
+  "sqlmodel==0.0.16",
+  "aiofiles==23.2.1",
+  "pydantic==2.6.1",
+  "starlette==0.36.3",
+  "websockets==12.0",
+  "python-multipart==0.0.9", # For handling file uploads in FastAPI
+  # CLI / Computer Vision
+  "torch==2.2.0 ; platform_system != 'Darwin'",
+  "torchvision==0.17.0 ; platform_system != 'Darwin'",
+  "torchaudio==2.2.0 ; platform_system != 'Darwin'",
+  "opencv-python==4.10.0.84",
+  "numpy==1.26.0",
+  "pillow==10.3.0",
+  "pycocotools==2.0.10",
+  "av==11.0.0", # For robust video processing
+  # Computer Vision Libraries
+  "ultralytics>=8.0.0", # YOLOv8/YOLO11 for object detection
+  "mediapipe>=0.10.0", # Google MediaPipe for pose/hand/face detection
+  # AlphaPose Dependencies (installed separately due to build complexity)
+  "easydict>=1.10",    # Configuration management for AlphaPose
+  "yacs>=0.1.8",       # Yet Another Configuration System
+  "tensorboardx>=2.6", # TensorBoard logging support
+  "scipy>=1.10.0",     # Scientific computing for pose processing
+  "matplotlib>=3.7.0", # Plotting and visualization
+  # AlphaPose (Optional) -----------------------------------------------
+# NOTE: AlphaPose depends on NumPy during its *build* step which causes
+# front-loading issues with most build back-ends (and `uv sync`).  To
+# keep the core environment resolvable, AlphaPose must be installed 
+# **after** the base environment is ready.
+#
+# INSTALLATION INSTRUCTIONS:
+# 1. First complete the base installation: `uv sync`
+# 2. Then install AlphaPose manually:
+#    uv pip install "alphapose @ git+https://github.com/MVIG-SJTU/AlphaPose"
+#
+# ALTERNATIVE (if compilation fails on Windows):
+# 3. Use the local AlphaPose directory approach:
+#    - Ensure ./AlphaPose directory exists with the AlphaPose source code
+#    - Set ALPHAPOSE_ROOT=./AlphaPose in your .env file
+#    - The CLI will automatically detect and use AlphaPose from the local directory
+#
+# The CLI automatically detects if AlphaPose is available and falls back
+# to MediaPipe or Ultralytics if not. For most use cases, MediaPipe 
+# provides excellent pose detection without the complexity of AlphaPose.
+  # Utilities
+  "loguru==0.7.2",
+  "python-dotenv==1.0.1",
+  "tqdm==4.66.1",
+  "pyyaml==6.0.1",
+  "requests==2.31.0",
+  "torch>=2.2.0",
+  "torchvision>=0.17.0",
+  "cython>=3.1.2",
+  "setuptools>=80.9.0",
+]
+
+[project.urls]
+Homepage      = "https://github.com/your-org/alphadetect"
+Documentation = "https://your-org.github.io/alphadetect"
+Issues        = "https://github.com/your-org/alphadetect/issues"
+Source        = "https://github.com/your-org/alphadetect"
+
+
+# --------------------------------------------------------------------
+# Optional dependency groups
+# Install with `uv pip install .[dev,test]`
+# --------------------------------------------------------------------
+[project.optional-dependencies]
+# Development tools: linters, formatters, etc.
+dev = [
+  "black==24.4.0",
+  "isort==5.13.2",
+  "ruff==0.4.0",
+  "mypy==1.10.0",
+  "pre-commit==3.7.0",
+]
+
+# Testing framework and plugins
+test = [
+  "pytest==8.2.0",
+  "pytest-asyncio==0.23.5",
+  "httpx==0.27.0",
+  "coverage[toml]==7.5.0",
+]
+
+# Documentation generator
+docs = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+]
+
+# --------------------------------------------------------------------
+# GPU support
+# --------------------------------------------------------------------
+# Pre-built CUDA wheels live on the official PyTorch index.  Because the
+# required `--extra-index-url` syntax is not part of the PEP-508 standard,
+# we cannot list them here without breaking `uv`/build-backend validation.
+# If you need GPU acceleration, install the appropriate wheels manually, e.g.:
+#
+#   uv pip install torch torchvision torchaudio --index-url \
+#       https://download.pytorch.org/whl/cu118
+#
+# Keep this section empty to avoid TOML schema errors.
+gpu = []
+
+# --------------------------------------------------------------------
+# Entry points for command-line scripts
+# --------------------------------------------------------------------
+[project.scripts]
+alphadetect-detect = "cli.detect:main"
+alphadetect-server = "server.app:app"
+
+# --------------------------------------------------------------------
+# Build-system configuration (PEP 517/518)
+# --------------------------------------------------------------------
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# --------------------------------------------------------------------
+# Setuptools package discovery
+# --------------------------------------------------------------------
+[tool.setuptools.packages.find]
+# Only package python sources; exclude the Next.js frontend
+include = ["cli*", "server*"]
+exclude = ["frontend*"]

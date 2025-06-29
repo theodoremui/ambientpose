@@ -1,0 +1,1542 @@
+#!/usr/bin/env python3
+"""
+AlphaDetect CLI - Human Pose Detection Tool
+
+This tool provides pose detection capabilities using multiple backends:
+- MediaPipe (primary, most reliable)
+- Ultralytics YOLO (alternative)
+- AlphaPose (if available)
+
+Author: AlphaDetect Team
+Date: 2025-06-22
+"""
+
+import argparse
+import csv
+import json
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import cv2
+import numpy as np
+from loguru import logger
+
+# Add AlphaPose to Python path if it exists
+alphapose_path = Path(__file__).parent.parent / "AlphaPose"
+if alphapose_path.exists():
+    sys.path.insert(0, str(alphapose_path))
+    logger.info(f"Added AlphaPose path: {alphapose_path}")
+
+# Configure logger
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:MM-DD HH:mm:ss}</green>|<level>{level: <5}</level>|<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
+
+
+# Check available backends
+MEDIAPIPE_AVAILABLE = False
+ULTRALYTICS_AVAILABLE = False
+ALPHAPOSE_AVAILABLE = False
+
+try:
+    import mediapipe as mp
+    MEDIAPIPE_AVAILABLE = True
+    logger.info("MediaPipe backend available")
+except ImportError:
+    logger.warning("MediaPipe not available")
+
+try:
+    from ultralytics import YOLO
+    ULTRALYTICS_AVAILABLE = True
+    logger.info("Ultralytics YOLO backend available")
+except ImportError:
+    logger.warning("Ultralytics YOLO not available")
+
+try:
+    import torch
+    from alphapose.models import builder
+    from alphapose.utils.config import update_config
+    from alphapose.utils.detector import DetectionLoader
+    from alphapose.utils.pPose_nms import pose_nms
+    
+    # Try to import YOLOX detector, fall back to alternatives if not available
+    try:
+        from detector.yolox.detector import YoloxDetector
+    except ImportError:
+        try:
+            # Alternative import path
+            from detector.yolox_api import YOLOXDetector as YoloxDetector
+        except ImportError:
+            try:
+                # Another alternative - use the API directly
+                from detector.apis import get_detector
+                YoloxDetector = None
+                logger.debug("YOLOX detector not available, will use fallback")
+            except ImportError:
+                YoloxDetector = None
+                logger.debug("No YOLOX detector available")
+    
+    ALPHAPOSE_AVAILABLE = True
+    logger.info("AlphaPose backend available")
+except ImportError as e:
+    ALPHAPOSE_AVAILABLE = False
+    logger.warning(f"AlphaPose not available: {e}")
+
+
+class AlphaDetectConfig:
+    """Configuration for AlphaDetect CLI."""
+    
+    # Default paths
+    DEFAULT_OUTPUT_DIR = Path("outputs")
+    
+    def __init__(self, args: argparse.Namespace):
+        """Initialize configuration from parsed arguments."""
+        self.input_path: Path = Path(args.video) if args.video else Path(args.image_dir)
+        self.is_video: bool = args.video is not None
+        
+        # Create output directory if it doesn't exist
+        self.output_dir: Path = Path(args.output_dir) if args.output_dir else self.DEFAULT_OUTPUT_DIR
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Generate timestamp for output files
+        self.timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Set output JSON path
+        if args.output:
+            self.output_json: Path = Path(args.output)
+        else:
+            filename = f"pose_{self.timestamp}.json"
+            self.output_json = self.output_dir / filename
+        
+        # Create frame and overlay directories
+        input_name = self.input_path.stem
+        self.frames_dir: Path = self.output_dir / f"frames_{input_name}_{self.timestamp}"
+        self.overlay_dir: Path = self.output_dir / f"overlay_{input_name}_{self.timestamp}"
+        
+        self.frames_dir.mkdir(exist_ok=True)
+        self.overlay_dir.mkdir(exist_ok=True)
+        
+        # Backend selection
+        self.backend: str = args.backend
+        self.debug: bool = args.debug
+        self.min_confidence: float = args.min_confidence
+        
+        # Validate configuration
+        self._validate()
+        
+        logger.info(f"Configuration initialized: backend={self.backend}, input={self.input_path}")
+    
+    def _validate(self) -> None:
+        """Validate the configuration."""
+        # Check if input exists
+        if not self.input_path.exists():
+            raise FileNotFoundError(f"Input path does not exist: {self.input_path}")
+        
+        # Check if output directory is writable
+        if not os.access(self.output_dir, os.W_OK):
+            raise PermissionError(f"Output directory is not writable: {self.output_dir}")
+
+
+class MediaPipeDetector:
+    """MediaPipe-based pose detector."""
+    
+    def __init__(self, config: AlphaDetectConfig):
+        """Initialize MediaPipe pose detector."""
+        if not MEDIAPIPE_AVAILABLE:
+            raise ImportError("MediaPipe is not available")
+        
+        self.config = config
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=config.min_confidence,
+            min_tracking_confidence=config.min_confidence
+        )
+        self.mp_drawing = mp.solutions.drawing_utils
+        
+        logger.info("MediaPipe pose detector initialized")
+    
+    def detect_poses(self, image: np.ndarray, frame_idx: int) -> List[Dict[str, Any]]:
+        """Detect poses in a single image."""
+        # Convert BGR to RGB
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Process the image
+        results = self.pose.process(rgb_image)
+        
+        poses = []
+        if results.pose_landmarks:
+            # Convert landmarks to our format
+            landmarks = results.pose_landmarks.landmark
+            height, width = image.shape[:2]
+            
+            # Calculate bounding box
+            x_coords = [lm.x * width for lm in landmarks]
+            y_coords = [lm.y * height for lm in landmarks]
+            
+            x1, x2 = min(x_coords), max(x_coords)
+            y1, y2 = min(y_coords), max(y_coords)
+            
+            # Add padding
+            padding = 20
+            x1 = max(0, x1 - padding)
+            y1 = max(0, y1 - padding)
+            x2 = min(width, x2 + padding)
+            y2 = min(height, y2 + padding)
+            
+            # Convert landmarks to keypoints
+            keypoints = []
+            for lm in landmarks:
+                x, y = lm.x * width, lm.y * height
+                confidence = lm.visibility if hasattr(lm, 'visibility') else 1.0
+                keypoints.append([x, y, confidence])
+            
+            pose = {
+                'frame_idx': frame_idx,
+                'bbox': [x1, y1, x2, y2, 1.0],  # confidence = 1.0 for MediaPipe
+                'score': 1.0,
+                'keypoints': keypoints,
+                'backend': 'mediapipe'
+            }
+            poses.append(pose)
+        
+        return poses
+    
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
+        """Draw poses on the image."""
+        if not poses:
+            return image
+        
+        # Convert to RGB for MediaPipe drawing
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        for pose in poses:
+            # Draw bounding box
+            bbox = pose['bbox']
+            x1, y1, x2, y2 = map(int, bbox[:4])
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Convert keypoints back to MediaPipe format for drawing
+            if len(pose['keypoints']) == 33:  # MediaPipe has 33 landmarks
+                # Create a mock landmark list
+                height, width = image.shape[:2]
+                landmark_list = []
+                
+                for x, y, conf in pose['keypoints']:
+                    # Create a simple object with x, y attributes
+                    class MockLandmark:
+                        def __init__(self, x, y):
+                            self.x = x / width
+                            self.y = y / height
+                    
+                    landmark_list.append(MockLandmark(x, y))
+                
+                # Draw pose connections
+                self._draw_landmarks(image, landmark_list)
+        
+        return image
+    
+    def _draw_landmarks(self, image: np.ndarray, landmarks: List) -> None:
+        """Draw pose landmarks and connections."""
+        # MediaPipe pose connections
+        connections = [
+            (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
+            (9, 10), (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
+            (17, 19), (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
+            (11, 23), (12, 24), (23, 24), (23, 25), (24, 26), (25, 27), (26, 28),
+            (27, 29), (28, 30), (29, 31), (30, 32), (27, 31), (28, 32)
+        ]
+        
+        height, width = image.shape[:2]
+        
+        # Draw landmarks
+        for landmark in landmarks:
+            x, y = int(landmark.x * width), int(landmark.y * height)
+            cv2.circle(image, (x, y), 3, (0, 255, 255), -1)
+        
+        # Draw connections
+        for connection in connections:
+            if connection[0] < len(landmarks) and connection[1] < len(landmarks):
+                start_landmark = landmarks[connection[0]]
+                end_landmark = landmarks[connection[1]]
+                
+                start_x, start_y = int(start_landmark.x * width), int(start_landmark.y * height)
+                end_x, end_y = int(end_landmark.x * width), int(end_landmark.y * height)
+                
+                cv2.line(image, (start_x, start_y), (end_x, end_y), (255, 255, 255), 2)
+
+
+class UltralyticsDetector:
+    """Ultralytics YOLO-based pose detector."""
+    
+    def __init__(self, config: AlphaDetectConfig):
+        """Initialize Ultralytics YOLO pose detector."""
+        if not ULTRALYTICS_AVAILABLE:
+            raise ImportError("Ultralytics YOLO is not available")
+        
+        self.config = config
+        self.model = YOLO('yolov8n-pose.pt')  # Load YOLOv8 pose model
+        
+        logger.info("Ultralytics YOLO pose detector initialized")
+    
+    def detect_poses(self, image: np.ndarray, frame_idx: int) -> List[Dict[str, Any]]:
+        """Detect poses in a single image."""
+        # Run YOLO inference
+        results = self.model(image, verbose=False)
+        
+        poses = []
+        for result in results:
+            if result.keypoints is not None:
+                boxes = result.boxes
+                keypoints = result.keypoints
+                
+                for i in range(len(boxes)):
+                    box = boxes[i]
+                    kpts = keypoints[i]
+                    
+                    # Extract box coordinates and confidence
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    box_conf = box.conf[0].cpu().numpy()
+                    
+                    # Skip low-confidence detections
+                    if box_conf < self.config.min_confidence:
+                        continue
+                    
+                    # Extract keypoints
+                    kpts_data = kpts.data[0].cpu().numpy()  # Shape: (17, 3) for COCO format
+                    keypoints_list = []
+                    
+                    for j in range(len(kpts_data)):
+                        x, y, conf = kpts_data[j]
+                        keypoints_list.append([float(x), float(y), float(conf)])
+                    
+                    pose = {
+                        'frame_idx': frame_idx,
+                        'bbox': [float(x1), float(y1), float(x2), float(y2), float(box_conf)],
+                        'score': float(box_conf),
+                        'keypoints': keypoints_list,
+                        'backend': 'ultralytics'
+                    }
+                    poses.append(pose)
+        
+        return poses
+    
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
+        """Draw poses on the image."""
+        if not poses:
+            return image
+        
+        # COCO skeleton connections (17 keypoints)
+        skeleton = [
+            (0, 1), (0, 2), (1, 3), (2, 4),  # Head
+            (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # Arms  
+            (5, 11), (6, 12), (11, 12),  # Torso
+            (11, 13), (13, 15), (12, 14), (14, 16)  # Legs
+        ]
+        
+        # Colors for different keypoints
+        colors = [
+            (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
+            (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
+            (0, 170, 255), (0, 85, 255), (0, 0, 255), (85, 0, 255), (170, 0, 255),
+            (255, 0, 255), (255, 0, 170)
+        ]
+        
+        # Improved drawing thresholds
+        drawing_threshold = 0.3  # Higher threshold for drawing
+        edge_margin = 10  # Minimum distance from image edges
+        height, width = image.shape[:2]
+        
+        for pose in poses:
+            # Draw bounding box
+            bbox = pose['bbox']
+            x1, y1, x2, y2 = map(int, bbox[:4])
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw confidence score
+            score = bbox[4] if len(bbox) > 4 else pose['score']
+            cv2.putText(image, f'{score:.4f}', (x1, y1-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            keypoints = pose['keypoints']
+            
+            # Function to validate keypoint
+            def is_valid_keypoint(x, y, conf):
+                """Check if keypoint is valid for drawing."""
+                return (conf > drawing_threshold and 
+                        x > edge_margin and y > edge_margin and 
+                        x < width - edge_margin and y < height - edge_margin)
+            
+            # Draw keypoints (only valid ones)
+            drawn_keypoints = 0
+            valid_keypoints = []
+            
+            for i, (x, y, conf) in enumerate(keypoints):
+                if is_valid_keypoint(x, y, conf):
+                    x, y = int(x), int(y)
+                    color = colors[i % len(colors)]
+                    cv2.circle(image, (x, y), 4, color, -1)
+                    
+                    # Optional: Draw keypoint index for debugging
+                    # cv2.putText(image, f'{i}', (x+5, y-5), 
+                    #            cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+                    
+                    valid_keypoints.append(i)
+                    drawn_keypoints += 1
+            
+            # Debug: Add drawn keypoint count
+            cv2.putText(image, f'KP:{drawn_keypoints}', (x1, y1-30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            # Draw skeleton (only between valid keypoints)
+            for connection in skeleton:
+                pt1_idx, pt2_idx = connection
+                
+                # Check if both keypoints exist and are valid
+                if (pt1_idx < len(keypoints) and pt2_idx < len(keypoints) and
+                    pt1_idx in valid_keypoints and pt2_idx in valid_keypoints):
+                    
+                    x1_kp, y1_kp, conf1 = keypoints[pt1_idx]
+                    x2_kp, y2_kp, conf2 = keypoints[pt2_idx]
+                    
+                    # Double-check both keypoints are valid
+                    if (is_valid_keypoint(x1_kp, y1_kp, conf1) and 
+                        is_valid_keypoint(x2_kp, y2_kp, conf2)):
+                        
+                        x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
+                        color = colors[pt1_idx % len(colors)]
+                        cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
+        
+        return image
+
+
+class AlphaPoseDetector:
+    """AlphaPose-based pose detector using official DetectionLoader pipeline."""
+    
+    def __init__(self, config: AlphaDetectConfig):
+        """Initialize AlphaPose detector."""
+        if not ALPHAPOSE_AVAILABLE:
+            raise ImportError("AlphaPose is not available")
+        
+        self.config = config
+        
+        # Set up device
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        logger.info(f"Using device: {self.device}")
+        
+        # Load AlphaPose configuration
+        alphapose_config_path = alphapose_path / "configs" / "coco" / "resnet" / "256x192_res50_lr1e-3_1x.yaml"
+        if not alphapose_config_path.exists():
+            # Fallback to any available config
+            config_files = list((alphapose_path / "configs").rglob("*.yaml"))
+            if not config_files:
+                raise FileNotFoundError("No AlphaPose config files found")
+            alphapose_config_path = config_files[0]
+            logger.warning(f"Using fallback config: {alphapose_config_path}")
+        
+        self.cfg = update_config(str(alphapose_config_path))
+        logger.info(f"Loaded AlphaPose config: {alphapose_config_path}")
+        
+        # Create AlphaPose options object for DetectionLoader
+        from easydict import EasyDict as edict
+        
+        # Set up paths for YOLOX
+        model_weights_path = alphapose_path / "detector" / "yolox" / "data" / "yolox_x.pth"
+        
+        self.opt = edict({
+            'device': self.device,
+            'sp': True,  # Single process mode
+            'tracking': False,  # No tracking for now
+            'detector': 'yolox-x',
+            'inputpath': None,  # Will be set per video
+            'outputpath': None,
+            'gpus': [0] if 'cuda' in str(self.device) else [-1],  # Required by get_detector
+            'ckpt': str(model_weights_path.resolve()),  # YOLOX checkpoint path
+        })
+        
+        # Initialize YOLOX detector (using the working approach from before)
+        try:
+            # YOLOX expects to be initialized from the AlphaPose directory
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(str(alphapose_path))
+                logger.debug(f"Changed working directory to: {alphapose_path}")
+                
+                from detector.apis import get_detector
+                self.detector = get_detector(self.opt)
+                logger.info("Initialized YOLOX detector using official API")
+            finally:
+                os.chdir(original_cwd)
+                logger.debug(f"Restored working directory to: {original_cwd}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to initialize via get_detector: {e}")
+            # Fallback to the working YOLOX approach
+            try:
+                original_cwd = os.getcwd()
+                try:
+                    os.chdir(str(alphapose_path))
+                    
+                    from detector.yolox_cfg import cfg as yolox_cfg
+                    from detector.yolox_api import YOLOXDetector
+                    
+                    # Set up YOLOX configuration (the working approach)
+                    yolox_cfg.MODEL_NAME = 'yolox-x'
+                    model_weights_path = alphapose_path / "detector" / "yolox" / "data" / "yolox_x.pth"
+                    yolox_cfg.MODEL_WEIGHTS = str(model_weights_path.resolve())  # Use absolute path
+                    
+                    # Also try setting the ckpt attribute that some YOLOX versions use
+                    if hasattr(yolox_cfg, 'ckpt'):
+                        yolox_cfg.ckpt = str(model_weights_path.resolve())
+                    
+                    if not model_weights_path.exists():
+                        logger.warning(f"YOLOX model weights not found: {model_weights_path}")
+                        logger.warning("YOLOX detector will not work properly without model weights")
+                        logger.info("Detection will fall back to Ultralytics YOLO")
+                        # Create a dummy detector that will fail gracefully
+                        self.detector = None
+                    else:
+                        self.detector = YOLOXDetector(yolox_cfg, self.opt)
+                        logger.info("Initialized YOLOX detector using direct approach")
+                finally:
+                    os.chdir(original_cwd)
+                    
+            except Exception as e2:
+                logger.warning(f"YOLOX initialization failed: {e2}")
+                logger.info("Will use Ultralytics YOLO fallback for detection")
+                self.detector = None
+        
+        # Build pose estimation model
+        self.pose_model = builder.build_sppe(self.cfg.MODEL, preset_cfg=self.cfg.DATA_PRESET)
+        
+        # Load pretrained weights
+        preferred_models = [
+            "fast_res50_256x192.pth",
+            "fast_dcn_res50_256x192.pth", 
+            "fast_421_res50-shuffle_256x192.pth",
+            "simple_res50_256x192.pth"
+        ]
+        
+        checkpoint_path = None
+        for model_name in preferred_models:
+            candidate_path = alphapose_path / "pretrained_models" / model_name
+            if candidate_path.exists():
+                checkpoint_path = candidate_path
+                logger.info(f"Using pose estimation model: {model_name}")
+                break
+        
+        if checkpoint_path and checkpoint_path.exists():
+            logger.info(f"Loading checkpoint: {checkpoint_path}")
+            try:
+                checkpoint = torch.load(str(checkpoint_path), map_location=self.device)
+                
+                if isinstance(checkpoint, dict):
+                    if 'state_dict' in checkpoint:
+                        self.pose_model.load_state_dict(checkpoint['state_dict'])
+                    elif 'model' in checkpoint:
+                        self.pose_model.load_state_dict(checkpoint['model'])
+                    else:
+                        self.pose_model.load_state_dict(checkpoint)
+                else:
+                    self.pose_model.load_state_dict(checkpoint)
+                    
+                logger.info(f"Successfully loaded pose model: {checkpoint_path.name}")
+            except Exception as e:
+                logger.error(f"Failed to load checkpoint {checkpoint_path}: {e}")
+                logger.warning("Checkpoint file may be corrupted. Using random weights instead.")
+                # Delete corrupted file
+                try:
+                    checkpoint_path.unlink()
+                    logger.info(f"Deleted corrupted checkpoint: {checkpoint_path}")
+                except:
+                    pass
+        else:
+            logger.warning("No checkpoint loaded - using random weights!")
+        
+        self.pose_model.to(self.device)
+        self.pose_model.eval()
+        
+        logger.info("AlphaPose detector initialized with official pipeline")
+    
+    def detect_poses(self, image: np.ndarray, frame_idx: int) -> List[Dict[str, Any]]:
+        """Detect poses using hybrid approach: working YOLOX detection + improved pose processing."""
+        height, width = image.shape[:2]
+        
+        try:
+            # Step 1: Human detection using the working YOLOX approach
+            human_boxes = []
+            
+            # Skip YOLOX if detector is None (failed to initialize)
+            if self.detector is None:
+                logger.debug("YOLOX detector not available, skipping to Ultralytics fallback")
+            else:
+                # Try the newer approach first, fall back to working file-based approach
+                try:
+                    # Method 1: In-memory detection (faster)
+                    logger.debug("Attempting in-memory YOLOX detection...")
+                    
+                    img_tensor = self.detector.image_preprocess(image)
+                    logger.debug(f"Image preprocessed, tensor type: {type(img_tensor)}")
+                    
+                    if isinstance(img_tensor, np.ndarray):
+                        img_tensor = torch.from_numpy(img_tensor)
+                    if img_tensor.dim() == 3:
+                        img_tensor = img_tensor.unsqueeze(0)
+                    
+                    logger.debug(f"Image tensor shape: {img_tensor.shape}")
+                    
+                    with torch.no_grad():
+                        im_dim_list = torch.FloatTensor([[width, height]]).repeat(1, 2)
+                        logger.debug(f"Running images_detection with dimensions: {im_dim_list}")
+                        
+                        dets = self.detector.images_detection(img_tensor, im_dim_list)
+                        logger.debug(f"Detection result type: {type(dets)}, shape: {getattr(dets, 'shape', 'no shape')}")
+                        
+                        if not isinstance(dets, int) and hasattr(dets, 'shape') and dets.shape[0] > 0:
+                            if isinstance(dets, np.ndarray):
+                                dets = torch.from_numpy(dets)
+                            dets = dets.cpu()
+                            
+                            # Extract human boxes from detections
+                            for det in dets:
+                                x1, y1, x2, y2 = det[1:5].numpy()
+                                det_conf = det[5].item()
+                                if det_conf >= self.config.min_confidence:
+                                    human_boxes.append([x1, y1, x2, y2, det_conf])
+                            
+                            logger.debug(f"In-memory YOLOX detected {len(human_boxes)} human boxes")
+                        else:
+                            logger.debug(f"No valid detections from in-memory method")
+                    
+                except Exception as e:
+                    import traceback
+                    logger.warning(f"In-memory detection failed: {str(e)}")
+                    logger.debug(f"Full traceback: {traceback.format_exc()}")
+                    logger.debug("Trying file-based approach...")
+                
+                # Method 2: File-based detection (the working approach from before)
+                if len(human_boxes) == 0 and self.detector is not None:
+                    try:
+                        import tempfile
+                        import time
+                        
+                        logger.debug("Attempting file-based YOLOX detection...")
+                        
+                        # Create temp file with numeric name (this was working before)
+                        temp_dir = tempfile.gettempdir()
+                        numeric_name = f"{int(time.time() * 1000000) % 999999999:09d}"
+                        temp_path = os.path.join(temp_dir, f"{numeric_name}.jpg")
+                        
+                        logger.debug(f"Writing temp image to: {temp_path}")
+                        success = cv2.imwrite(temp_path, image)
+                        if not success:
+                            raise Exception(f"Failed to write image to {temp_path}")
+                        
+                        logger.debug(f"Temp file created, size: {os.path.getsize(temp_path)} bytes")
+                        
+                        # Check if detector has detect_one_img method
+                        if not hasattr(self.detector, 'detect_one_img'):
+                            raise AttributeError(f"Detector {type(self.detector)} does not have detect_one_img method")
+                        
+                        # Use the working detect_one_img approach
+                        logger.debug("Calling detect_one_img...")
+                        detection_results = self.detector.detect_one_img(temp_path)
+                        logger.debug(f"Detection results type: {type(detection_results)}, length: {len(detection_results) if detection_results else 0}")
+                        
+                        # Clean up temp file
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
+                            logger.debug("Temp file cleaned up")
+                        
+                        # Convert to our format (this was working before)
+                        if detection_results:
+                            logger.debug(f"Processing {len(detection_results)} detection results")
+                            for i, det in enumerate(detection_results):
+                                logger.debug(f"Detection {i}: {det}")
+                                if det.get('category_id') == 1:  # person category
+                                    x, y, w, h = det['bbox']
+                                    x1, y1, x2, y2 = x, y, x + w, y + h
+                                    score = det['score']
+                                    if score >= self.config.min_confidence:
+                                        human_boxes.append([x1, y1, x2, y2, score])
+                                        logger.debug(f"Added human box: [{x1}, {y1}, {x2}, {y2}] score={score}")
+                        else:
+                            logger.debug("No detection results returned")
+                        
+                        logger.debug(f"File-based YOLOX detected {len(human_boxes)} human boxes")
+                        
+                    except Exception as e:
+                        import traceback
+                        logger.warning(f"File-based detection also failed: {str(e)}")
+                        logger.debug(f"Full traceback: {traceback.format_exc()}")
+            
+            # Method 3: Fallback to Ultralytics YOLO if YOLOX completely fails
+            if len(human_boxes) == 0:
+                logger.warning("YOLOX detection completely failed, trying Ultralytics YOLO fallback...")
+                try:
+                    if ULTRALYTICS_AVAILABLE:
+                        from ultralytics import YOLO
+                        if not hasattr(self, '_fallback_detector'):
+                            self._fallback_detector = YOLO('yolov8n.pt')
+                            logger.debug("Initialized fallback Ultralytics detector")
+                        
+                        results = self._fallback_detector(image, verbose=False)
+                        logger.debug(f"Ultralytics YOLO returned {len(results)} results")
+                        
+                        for result in results:
+                            if result.boxes is not None:
+                                boxes = result.boxes
+                                logger.debug(f"Found {len(boxes)} boxes")
+                                for i in range(len(boxes)):
+                                    box = boxes[i]
+                                    cls = int(box.cls[0])
+                                    # Only keep person class (class 0 in COCO)
+                                    if cls == 0:
+                                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                                        conf = box.conf[0].cpu().numpy()
+                                        if conf >= self.config.min_confidence:
+                                            human_boxes.append([x1, y1, x2, y2, conf])
+                                            logger.debug(f"Added Ultralytics detection: [{x1}, {y1}, {x2}, {y2}] score={conf}")
+                        
+                        logger.info(f"Ultralytics fallback detected {len(human_boxes)} human boxes")
+                    else:
+                        logger.warning("Ultralytics not available for fallback")
+                        
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Ultralytics fallback also failed: {str(e)}")
+                    logger.debug(f"Ultralytics traceback: {traceback.format_exc()}")
+            
+            if len(human_boxes) == 0:
+                logger.warning("All detection methods failed - no human detections found")
+                return []
+            
+            # Step 2: Pose estimation using official AlphaPose coordinate processing
+            from alphapose.utils.presets import SimpleTransform
+            pose_dataset = builder.retrieve_dataset(self.cfg.DATASET.TRAIN)
+            transformation = SimpleTransform(
+                pose_dataset, scale_factor=0,
+                input_size=self.cfg.DATA_PRESET.IMAGE_SIZE,
+                output_size=self.cfg.DATA_PRESET.HEATMAP_SIZE,
+                rot=0, sigma=self.cfg.DATA_PRESET.SIGMA,
+                train=False, add_dpg=False, gpu_device=self.device)
+            
+            poses = []
+            
+            for box in human_boxes:
+                x1, y1, x2, y2, det_conf = box
+                
+                try:
+                    # Use official AlphaPose transformation
+                    pose_input, cropped_box = transformation.test_transform(image, [x1, y1, x2, y2])
+                    
+                    # Run pose estimation
+                    with torch.no_grad():
+                        pose_input = pose_input.unsqueeze(0).to(self.device)
+                        heatmaps = self.pose_model(pose_input)
+                        if isinstance(heatmaps, list):
+                            heatmaps = heatmaps[-1]
+                        
+                        # Use official coordinate conversion
+                        from alphapose.utils.transforms import heatmap_to_coord_simple
+                        heatmaps_np = heatmaps[0].cpu().numpy()
+                        coords, maxvals = heatmap_to_coord_simple(heatmaps_np, cropped_box)
+                        
+                        keypoints = []
+                        for j in range(len(coords)):
+                            if j < len(maxvals):
+                                x_coord = float(coords[j, 0])
+                                y_coord = float(coords[j, 1])
+                                confidence = float(maxvals[j, 0])
+                                
+                                # Validate coordinates
+                                if 0 <= x_coord <= width and 0 <= y_coord <= height and confidence > 0:
+                                    keypoints.append([x_coord, y_coord, confidence])
+                        
+                        if len(keypoints) > 0:
+                            pose = {
+                                'frame_idx': frame_idx,
+                                'bbox': [float(x1), float(y1), float(x2), float(y2), float(det_conf)],
+                                'score': float(det_conf),
+                                'keypoints': keypoints,
+                                'backend': 'alphapose'
+                            }
+                            poses.append(pose)
+                            
+                            if self.config.debug:
+                                logger.debug(f"Pose extracted: {len(keypoints)} keypoints, score={det_conf:.3f}")
+                
+                except Exception as e:
+                    logger.debug(f"Error processing detection: {e}")
+                    continue
+            
+            # Apply pose NMS if needed
+            if len(poses) > 1:
+                try:
+                    pose_coords = []
+                    pose_scores = []
+                    for pose in poses:
+                        coords = np.array([[kp[0], kp[1], kp[2]] for kp in pose['keypoints']])
+                        pose_coords.append(coords)
+                        pose_scores.append(pose['score'])
+                    
+                    keep_indices = pose_nms(np.array(pose_coords), np.array(pose_scores), 0.5)
+                    if keep_indices is not None and len(keep_indices) > 0:
+                        poses = [poses[i] for i in keep_indices if i < len(poses)]
+                except Exception as e:
+                    logger.debug(f"Pose NMS failed: {e}, keeping all poses")
+            
+            return poses
+            
+        except Exception as e:
+            logger.error(f"AlphaPose detection failed: {e}")
+            return []
+    
+
+    
+    def _simple_pose_filter(self, poses: List[Dict[str, Any]]) -> List[int]:
+        """Simple pose filtering based on overlap and confidence when NMS is not available."""
+        if len(poses) <= 1:
+            return list(range(len(poses)))
+        
+        # Sort poses by confidence (highest first)
+        sorted_indices = sorted(range(len(poses)), key=lambda i: poses[i]['score'], reverse=True)
+        
+        keep_indices = []
+        for i in sorted_indices:
+            keep = True
+            pose_i = poses[i]
+            
+            # Check overlap with already selected poses
+            for j in keep_indices:
+                pose_j = poses[j]
+                
+                # Calculate bbox overlap
+                bbox_i = pose_i['bbox'][:4]
+                bbox_j = pose_j['bbox'][:4]
+                
+                # Simple overlap check - if bboxes overlap significantly, skip lower confidence pose
+                overlap = self._calculate_bbox_overlap(bbox_i, bbox_j)
+                if overlap > 0.5:  # 50% overlap threshold
+                    keep = False
+                    break
+            
+            if keep:
+                keep_indices.append(i)
+        
+        return keep_indices
+    
+    def _calculate_bbox_overlap(self, box1: List[float], box2: List[float]) -> float:
+        """Calculate overlap ratio between two bounding boxes."""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+        
+        # Calculate intersection
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return 0.0
+        
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        
+        # Return intersection over smaller area (more conservative)
+        return intersection / min(area1, area2) if min(area1, area2) > 0 else 0.0
+    
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
+        """Draw poses on the image."""
+        if not poses:
+            return image
+        
+        # COCO skeleton connections (17 keypoints)
+        skeleton = [
+            (0, 1), (0, 2), (1, 3), (2, 4),  # Head
+            (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),  # Arms  
+            (5, 11), (6, 12), (11, 12),  # Torso
+            (11, 13), (13, 15), (12, 14), (14, 16)  # Legs
+        ]
+        
+        # Colors for different keypoints
+        colors = [
+            (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
+            (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
+            (0, 170, 255), (0, 85, 255), (0, 0, 255), (85, 0, 255), (170, 0, 255),
+            (255, 0, 255), (255, 0, 170)
+        ]
+        
+        # Appropriate drawing thresholds for AlphaPose using official coordinate processing
+        drawing_threshold = 0.1  # Lower threshold for AlphaPose as official processing gives better confidence scores
+        edge_margin = 10  # Minimum distance from image edges
+        height, width = image.shape[:2]
+        
+        for pose in poses:
+            # Draw bounding box
+            bbox = pose['bbox']
+            x1, y1, x2, y2 = map(int, bbox[:4])
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Draw confidence score
+            score = bbox[4] if len(bbox) > 4 else pose['score']
+            cv2.putText(image, f'{score:.4f}', (x1, y1-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            keypoints = pose['keypoints']
+            
+            # Function to validate keypoint
+            def is_valid_keypoint(x, y, conf):
+                """Check if keypoint is valid for drawing."""
+                return (conf > drawing_threshold and 
+                        x > edge_margin and y > edge_margin and 
+                        x < width - edge_margin and y < height - edge_margin)
+            
+            # Draw keypoints (only valid ones)
+            drawn_keypoints = 0
+            valid_keypoints = []
+            
+            for i, (x, y, conf) in enumerate(keypoints):
+                if is_valid_keypoint(x, y, conf):
+                    x, y = int(x), int(y)
+                    color = colors[i % len(colors)]
+                    cv2.circle(image, (x, y), 4, color, -1)
+                    
+                    # Optional: Draw keypoint index for debugging
+                    # cv2.putText(image, f'{i}', (x+5, y-5), 
+                    #            cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+                    
+                    valid_keypoints.append(i)
+                    drawn_keypoints += 1
+            
+            # Debug: Add drawn keypoint count
+            cv2.putText(image, f'KP:{drawn_keypoints}', (x1, y1-30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            # Draw skeleton (only between valid keypoints)
+            for connection in skeleton:
+                pt1_idx, pt2_idx = connection
+                
+                # Check if both keypoints exist and are valid
+                if (pt1_idx < len(keypoints) and pt2_idx < len(keypoints) and
+                    pt1_idx in valid_keypoints and pt2_idx in valid_keypoints):
+                    
+                    x1_kp, y1_kp, conf1 = keypoints[pt1_idx]
+                    x2_kp, y2_kp, conf2 = keypoints[pt2_idx]
+                    
+                    # Double-check both keypoints are valid
+                    if (is_valid_keypoint(x1_kp, y1_kp, conf1) and 
+                        is_valid_keypoint(x2_kp, y2_kp, conf2)):
+                        
+                        x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
+                        color = colors[pt1_idx % len(colors)]
+                        cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
+        
+        return image
+
+
+class PersonTracker:
+    """Simple person tracker to maintain consistent person_id across frames."""
+    
+    def __init__(self, iou_threshold: float = 0.3):
+        """Initialize person tracker."""
+        self.iou_threshold = iou_threshold
+        self.tracks = []  # List of tracked persons
+        self.next_person_id = 0
+        
+    def calculate_iou(self, box1: List[float], box2: List[float]) -> float:
+        """Calculate Intersection over Union (IoU) between two bounding boxes."""
+        x1_1, y1_1, x2_1, y2_1 = box1[:4]
+        x1_2, y1_2, x2_2, y2_2 = box2[:4]
+        
+        # Calculate intersection area
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return 0.0
+        
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        
+        # Calculate union area
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0.0
+    
+    def update(self, current_poses: List[Dict[str, Any]], frame_number: int) -> List[Dict[str, Any]]:
+        """Update tracks with current frame poses and assign person_ids."""
+        if not current_poses:
+            return []
+        
+        # Extract bounding boxes from current poses
+        current_boxes = [pose['bbox'] for pose in current_poses]
+        
+        # If this is the first frame, initialize all tracks
+        if not self.tracks:
+            for i, pose in enumerate(current_poses):
+                track = {
+                    'person_id': self.next_person_id,
+                    'bbox': pose['bbox'],
+                    'last_seen_frame': frame_number,
+                    'pose': pose
+                }
+                self.tracks.append(track)
+                pose['person_id'] = self.next_person_id
+                self.next_person_id += 1
+            return current_poses
+        
+        # Match current detections with existing tracks
+        matched_tracks = set()
+        matched_detections = set()
+        
+        for i, current_box in enumerate(current_boxes):
+            best_iou = 0
+            best_track_idx = -1
+            
+            for j, track in enumerate(self.tracks):
+                if j in matched_tracks:
+                    continue
+                    
+                iou = self.calculate_iou(current_box, track['bbox'])
+                if iou > self.iou_threshold and iou > best_iou:
+                    best_iou = iou
+                    best_track_idx = j
+            
+            if best_track_idx >= 0:
+                # Match found
+                track = self.tracks[best_track_idx]
+                current_poses[i]['person_id'] = track['person_id']
+                track['bbox'] = current_box
+                track['last_seen_frame'] = frame_number
+                track['pose'] = current_poses[i]
+                matched_tracks.add(best_track_idx)
+                matched_detections.add(i)
+        
+        # Create new tracks for unmatched detections
+        for i, pose in enumerate(current_poses):
+            if i not in matched_detections:
+                track = {
+                    'person_id': self.next_person_id,
+                    'bbox': pose['bbox'],
+                    'last_seen_frame': frame_number,
+                    'pose': pose
+                }
+                self.tracks.append(track)
+                pose['person_id'] = self.next_person_id
+                self.next_person_id += 1
+        
+        # Remove old tracks (not seen for 30 frames)
+        self.tracks = [track for track in self.tracks if frame_number - track['last_seen_frame'] <= 30]
+        
+        return current_poses
+
+
+def get_coco_joint_names() -> List[str]:
+    """Get COCO joint names in order."""
+    return [
+        "nose",           # 0
+        "left_eye",       # 1  
+        "right_eye",      # 2
+        "left_ear",       # 3
+        "right_ear",      # 4
+        "left_shoulder",  # 5
+        "right_shoulder", # 6
+        "left_elbow",     # 7
+        "right_elbow",    # 8
+        "left_wrist",     # 9
+        "right_wrist",    # 10
+        "left_hip",       # 11
+        "right_hip",      # 12
+        "left_knee",      # 13
+        "right_knee",     # 14
+        "left_ankle",     # 15
+        "right_ankle",    # 16
+        "joint_17"        # 17 (additional joint from example)
+    ]
+
+
+def convert_pose_to_joints_format(pose: Dict[str, Any], frame_number: int, timestamp: float) -> Dict[str, Any]:
+    """Convert pose data to the target joints format."""
+    joint_names = get_coco_joint_names()
+    
+    joints = []
+    keypoints = pose['keypoints']
+    
+    # Ensure we have enough keypoints, pad with zeros if needed
+    while len(keypoints) < len(joint_names):
+        keypoints.append([0.0, 0.0, 0.0])
+    
+    for i, joint_name in enumerate(joint_names):
+        if i < len(keypoints):
+            x, y, confidence = keypoints[i]
+        else:
+            x, y, confidence = 0.0, 0.0, 0.0
+        
+        # Skip keypoints at (0,0) as they are spurious/undetected
+        if x == 0.0 and y == 0.0:
+            continue
+            
+        joint = {
+            "name": joint_name,
+            "joint_id": i,
+            "keypoint": {
+                "x": round(float(x), 4),
+                "y": round(float(y), 4), 
+                "confidence": round(float(confidence), 4)
+            }
+        }
+        joints.append(joint)
+    
+    # Calculate overall pose confidence (average of valid keypoint confidences)
+    valid_confidences = [kp[2] for kp in keypoints if kp[2] > 0 and not (kp[0] == 0.0 and kp[1] == 0.0)]
+    overall_confidence = sum(valid_confidences) / len(valid_confidences) if valid_confidences else 0.0
+    
+    return {
+        "person_id": pose.get('person_id', 0),
+        "frame_number": frame_number,
+        "timestamp": timestamp,
+        "confidence": round(float(overall_confidence), 4),
+        "joints": joints
+    }
+
+
+class PoseDetector:
+    """Main pose detector that manages different backends."""
+    
+    def __init__(self, config: AlphaDetectConfig):
+        """Initialize the pose detector with the best available backend."""
+        self.config = config
+        self.detector = None
+        self.person_tracker = PersonTracker()
+        self.video_metadata = {}
+        self.all_converted_poses = []  # Store poses in the new format
+        
+        # Select backend
+        if config.backend == "auto":
+            # Auto-select the best available backend
+            if MEDIAPIPE_AVAILABLE:
+                self.backend_name = "mediapipe"
+                self.detector = MediaPipeDetector(config)
+            elif ULTRALYTICS_AVAILABLE:
+                self.backend_name = "ultralytics"
+                self.detector = UltralyticsDetector(config)
+            elif ALPHAPOSE_AVAILABLE:
+                self.backend_name = "alphapose"
+                self.detector = AlphaPoseDetector(config)
+            else:
+                raise RuntimeError("No pose detection backends available. Please install MediaPipe, Ultralytics, or AlphaPose.")
+        elif config.backend == "mediapipe":
+            if not MEDIAPIPE_AVAILABLE:
+                raise RuntimeError("MediaPipe backend not available. Please install MediaPipe.")
+            self.backend_name = "mediapipe"
+            self.detector = MediaPipeDetector(config)
+        elif config.backend == "ultralytics":
+            if not ULTRALYTICS_AVAILABLE:
+                raise RuntimeError("Ultralytics backend not available. Please install Ultralytics.")
+            self.backend_name = "ultralytics"
+            self.detector = UltralyticsDetector(config)
+        elif config.backend == "alphapose":
+            if not ALPHAPOSE_AVAILABLE:
+                logger.error("❌ AlphaPose backend requested but not available!")
+                logger.error("")
+                logger.error("🔧 To install AlphaPose on Windows:")
+                logger.error("   1. Install Visual Studio Build Tools with C++ workload")
+                logger.error("   2. Run: uv run python scripts/install_alphapose.py")
+                logger.error("")
+                logger.error("💡 Falling back to best available backend...")
+                
+                # Auto-select the best available backend as fallback
+                if MEDIAPIPE_AVAILABLE:
+                    logger.info("🔄 Using MediaPipe backend as fallback")
+                    self.backend_name = "mediapipe"
+                    self.detector = MediaPipeDetector(config)
+                elif ULTRALYTICS_AVAILABLE:
+                    logger.info("🔄 Using Ultralytics backend as fallback")
+                    self.backend_name = "ultralytics"
+                    self.detector = UltralyticsDetector(config)
+                else:
+                    raise RuntimeError("AlphaPose backend not available and no fallback backends found. Please install MediaPipe, Ultralytics, or AlphaPose.")
+            else:
+                self.backend_name = "alphapose"
+                self.detector = AlphaPoseDetector(config)
+        else:
+            raise ValueError(f"Unknown backend: {config.backend}")
+        
+        logger.info(f"Using backend: {self.backend_name}")
+    
+    def process_video(self) -> List[Dict[str, Any]]:
+        """Process a video file and return pose data."""
+        video_path = str(self.config.input_path)
+        logger.info(f"Processing video: {video_path}")
+        
+        # Open video file
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise IOError(f"Failed to open video: {video_path}")
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        duration = total_frames / fps if fps > 0 else 0
+        
+        # Store video metadata
+        self.video_metadata = {
+            "width": width,
+            "height": height,
+            "fps": float(fps),
+            "frame_count": total_frames,
+            "duration": float(duration)
+        }
+        
+        logger.info(f"Video info: {total_frames} frames, {fps:.4f} FPS, {width}x{height}")
+        
+        # Process frames
+        all_poses = []
+        frame_idx = 0
+        
+        with logger.contextualize(video=video_path):
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # Log progress
+                if frame_idx % 10 == 0 or frame_idx == 0:
+                    progress = frame_idx / total_frames * 100 if total_frames > 0 else 0
+                    logger.info(f"Processing frame {frame_idx}/{total_frames} ({progress:.1f}%)")
+                
+                # Save raw frame
+                frame_filename = f"frame_{frame_idx:06d}.jpg"
+                cv2.imwrite(str(self.config.frames_dir / frame_filename), frame)
+                
+                # Detect poses
+                poses = self.detector.detect_poses(frame, frame_idx)
+                
+                # Apply person tracking
+                tracked_poses = self.person_tracker.update(poses, frame_idx)
+                all_poses.extend(tracked_poses)
+                
+                # Convert to new format and store
+                timestamp = frame_idx / fps if fps > 0 else 0.0
+                for pose in tracked_poses:
+                    converted_pose = convert_pose_to_joints_format(pose, frame_idx, timestamp)
+                    self.all_converted_poses.append(converted_pose)
+                
+                # Draw and save overlay frame
+                overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses)
+                cv2.imwrite(str(self.config.overlay_dir / frame_filename), overlay_frame)
+                
+                frame_idx += 1
+        
+        cap.release()
+        logger.info(f"Video processing complete: {frame_idx} frames processed, {len(all_poses)} poses detected")
+        
+        return all_poses
+    
+    def process_images(self) -> List[Dict[str, Any]]:
+        """Process a directory of images and return pose data."""
+        image_dir = self.config.input_path
+        logger.info(f"Processing images in directory: {image_dir}")
+        
+        # Get all image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
+        image_files = sorted([
+            f for f in image_dir.iterdir() 
+            if f.is_file() and f.suffix.lower() in image_extensions
+        ])
+        
+        if not image_files:
+            raise ValueError(f"No image files found in directory: {image_dir}")
+        
+        logger.info(f"Found {len(image_files)} image files")
+        
+        # Set metadata for image processing
+        if image_files:
+            first_image = cv2.imread(str(image_files[0]))
+            if first_image is not None:
+                height, width = first_image.shape[:2]
+                self.video_metadata = {
+                    "width": width,
+                    "height": height,
+                    "fps": 1.0,  # 1 FPS for images
+                    "frame_count": len(image_files),
+                    "duration": float(len(image_files))
+                }
+        
+        # Process images
+        all_poses = []
+        
+        for idx, image_path in enumerate(image_files):
+            # Log progress
+            if idx % 10 == 0 or idx == 0:
+                progress = (idx + 1) / len(image_files) * 100
+                logger.info(f"Processing image {idx+1}/{len(image_files)} ({progress:.1f}%)")
+            
+            # Read image
+            frame = cv2.imread(str(image_path))
+            if frame is None:
+                logger.warning(f"Failed to read image: {image_path}")
+                continue
+            
+            # Save raw frame
+            frame_filename = f"frame_{idx:06d}.jpg"
+            cv2.imwrite(str(self.config.frames_dir / frame_filename), frame)
+            
+            # Detect poses
+            poses = self.detector.detect_poses(frame, idx)
+            
+            # Apply person tracking
+            tracked_poses = self.person_tracker.update(poses, idx)
+            all_poses.extend(tracked_poses)
+            
+            # Convert to new format and store
+            timestamp = float(idx)  # Use frame index as timestamp for images
+            for pose in tracked_poses:
+                converted_pose = convert_pose_to_joints_format(pose, idx, timestamp)
+                self.all_converted_poses.append(converted_pose)
+            
+            # Draw and save overlay frame
+            overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses)
+            cv2.imwrite(str(self.config.overlay_dir / frame_filename), overlay_frame)
+        
+        logger.info(f"Image processing complete: {len(image_files)} images processed, {len(all_poses)} poses detected")
+        
+        return all_poses
+    
+    def save_results(self, poses: List[Dict[str, Any]]) -> None:
+        """Save pose detection results to JSON file in the new format."""
+        logger.info(f"Saving results to {self.config.output_json}")
+        
+        # Create output directory if it doesn't exist
+        self.config.output_json.parent.mkdir(exist_ok=True, parents=True)
+        
+        # Generate timestamp in the required format
+        from datetime import datetime
+        output_generated_at = datetime.now().isoformat()
+        
+        # Calculate summary statistics
+        total_poses = len(self.all_converted_poses)
+        unique_people = len(set(pose['person_id'] for pose in self.all_converted_poses))
+        frames_with_poses = len(set(pose['frame_number'] for pose in self.all_converted_poses))
+        total_frames = self.video_metadata.get('frame_count', frames_with_poses)
+        avg_poses_per_frame = round(total_poses / total_frames, 4) if total_frames > 0 else 0
+        
+        # Determine model info based on backend
+        if self.backend_name == "alphapose":
+            model_pose = "COCO"
+            net_resolution = "256x192"  # Based on AlphaPose config
+        elif self.backend_name == "ultralytics":
+            model_pose = "COCO"
+            net_resolution = "640x640"  # YOLOv8 default
+        else:  # mediapipe
+            model_pose = "COCO"
+            net_resolution = "256x256"  # MediaPipe pose
+        
+        # Build the complete JSON structure
+        result = {
+            "metadata": {
+                "input_file": str(self.config.input_path).replace('/', '\\'),
+                "output_generated_at": output_generated_at,
+                "total_poses_detected": total_poses,
+                "processing_info": {
+                    "input_type": "video" if self.config.is_video else "images",
+                    "video_metadata": self.video_metadata,
+                    "model_pose": model_pose,
+                    "net_resolution": net_resolution,
+                    "confidence_threshold": self.config.min_confidence
+                }
+            },
+            "summary": {
+                "total_poses": total_poses,
+                "total_frames": total_frames,
+                "people_detected": unique_people,
+                "frames_with_poses": frames_with_poses,
+                "average_poses_per_frame": avg_poses_per_frame
+            },
+            "poses": self.all_converted_poses
+        }
+        
+        # Save JSON
+        with open(self.config.output_json, 'w') as f:
+            json.dump(result, f, indent=2)
+        
+        logger.success(f"Results saved: {total_poses} poses detected using {self.backend_name} backend")
+        logger.success(f"Tracked {unique_people} unique people across {total_frames} frames")
+    
+    def save_csv_results(self, poses: List[Dict[str, Any]]) -> None:
+        """Save pose detection results to CSV file with detailed joint information."""
+        # Generate CSV filename
+        csv_filename = self.config.output_json.stem + ".csv"
+        csv_path = self.config.output_json.parent / csv_filename
+        
+        logger.info(f"Saving CSV results to {csv_path}")
+        
+        # Helper function to format floating point numbers
+        def format_float(value: float) -> str:
+            """Format float to max 2 decimal places or 4 significant digits."""
+            if abs(value) >= 100:
+                # For large numbers, use 2 decimal places
+                return f"{value:.4f}"
+            elif abs(value) >= 1:
+                # For numbers >= 1, use up to 2 decimal places
+                formatted = f"{value:.4f}"
+                # Remove trailing zeros
+                return formatted.rstrip('0').rstrip('.')
+            else:
+                # For small numbers, use up to 4 significant digits
+                if value == 0:
+                    return "0"
+                # Format with 4 significant digits, then limit decimal places
+                formatted = f"{value:.4g}"
+                # If it has more than 2 decimal places, limit to 2
+                if '.' in formatted and len(formatted.split('.')[1]) > 2:
+                    formatted = f"{value:.4f}"
+                return formatted
+        
+        # CSV headers
+        headers = [
+            'frame_number', 'timestamp', 'person_id', 'joint_name', 'joint_id',
+            'x', 'y', 'confidence', 'pose_confidence', 'total_joints'
+        ]
+        
+        # Write CSV file
+        with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            
+            # Write header
+            writer.writerow(headers)
+            
+            # Write data rows
+            for pose in self.all_converted_poses:
+                frame_number = pose['frame_number']
+                timestamp = pose['timestamp']
+                person_id = pose['person_id']
+                pose_confidence = pose['confidence']
+                total_joints = len(pose['joints'])
+                
+                # Write one row per joint
+                for joint in pose['joints']:
+                    joint_name = joint['name']
+                    joint_id = joint['joint_id']
+                    x = joint['keypoint']['x']
+                    y = joint['keypoint']['y']
+                    confidence = joint['keypoint']['confidence']
+                    
+                    # Format the row with proper number formatting
+                    row = [
+                        frame_number,                    # int
+                        format_float(timestamp),         # float
+                        person_id,                       # int
+                        joint_name,                      # string
+                        joint_id,                        # int
+                        format_float(x),                 # float
+                        format_float(y),                 # float
+                        format_float(confidence),        # float
+                        format_float(pose_confidence),   # float
+                        total_joints                     # int
+                    ]
+                    
+                    writer.writerow(row)
+        
+        # Calculate statistics
+        total_rows = sum(len(pose['joints']) for pose in self.all_converted_poses)
+        logger.success(f"CSV saved: {total_rows} joint records across {len(self.all_converted_poses)} poses")
+        logger.success(f"CSV output: {csv_path}")
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='AlphaDetect: Multi-backend pose detection tool',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    # Input options
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--video', type=str, help='Path to input video file')
+    input_group.add_argument('--image-dir', type=str, help='Path to directory containing image files')
+    
+    # Output options
+    parser.add_argument('--output', type=str, help='Path to output JSON file (default: outputs/pose_<timestamp>.json)')
+    parser.add_argument('--output-dir', type=str, default='outputs', help='Directory for output files')
+    
+    # Backend options
+    parser.add_argument('--backend', type=str, default='auto', 
+                        choices=['auto', 'mediapipe', 'ultralytics', 'alphapose'],
+                        help='Pose detection backend to use')
+    parser.add_argument('--min-confidence', type=float, default=0.5,
+                        help='Minimum confidence threshold for detections')
+    
+    # Debug options
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Main entry point."""
+    start_time = time.time()
+    
+    try:
+        # Parse arguments
+        args = parse_args()
+        
+        # Check if any backends are available
+        if not (MEDIAPIPE_AVAILABLE or ULTRALYTICS_AVAILABLE or ALPHAPOSE_AVAILABLE):
+            logger.error("No pose detection backends available!")
+            logger.error("Please install at least one of the following:")
+            logger.error("  - MediaPipe: pip install mediapipe")
+            logger.error("  - Ultralytics: pip install ultralytics")
+            logger.error("  - AlphaPose: Follow instructions in docs/INSTALL.md")
+            return 1
+        
+        # Initialize configuration
+        config = AlphaDetectConfig(args)
+        
+        # Initialize pose detector
+        detector = PoseDetector(config)
+        
+        # Process input
+        if config.is_video:
+            poses = detector.process_video()
+        else:
+            poses = detector.process_images()
+        
+        # Save results
+        detector.save_results(poses)
+        detector.save_csv_results(poses)
+        
+        # Print summary
+        elapsed_time = time.time() - start_time
+        logger.success(f"Processing completed in {elapsed_time:.4f} seconds")
+        logger.success(f"Output saved to: {config.output_json}")
+        logger.success(f"Frames saved to: {config.frames_dir}")
+        logger.success(f"Overlays saved to: {config.overlay_dir}")
+        
+        return 0
+        
+    except KeyboardInterrupt:
+        logger.warning("Process interrupted by user")
+        return 130
+    except Exception as e:
+        logger.exception(f"Error: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
