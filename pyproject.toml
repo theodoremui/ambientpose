@@ -1,16 +1,16 @@
 [project]
-name = "alphadetect"
-version = "0.1.0"
+name = "ambientpose"
+version = "0.2.0"
 
 # --------------------------------------------------------------------
 # Project metadata
 # --------------------------------------------------------------------
-description = "AlphaDetect – End-to-end human-pose detection platform built on (CLI ✦ FastAPI ✦ Next.js)."
+description = "AmbientPose – End-to-end human-pose detection platform built on (CLI ✦ FastAPI ✦ Next.js)."
 readme      = "README.md"
 requires-python = ">=3.10,<3.13"
 license = "MIT"
 authors = [
-  { name = "AlphaDetect Team", email = "opensource@alphadetect.ai" },
+  { name = "Theodore Mui", email = "theodoremui@gmail.com" },
 ]
 keywords = ["pose-detection", "alphapose", "fastapi", "computer-vision", "nextjs"]
 
