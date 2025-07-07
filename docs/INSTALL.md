@@ -419,9 +419,9 @@ make run-server
 
 If AlphaPose continues to cause issues, the project supports these alternatives:
 
-1. **MediaPipe** - Google's pose estimation framework
+1. **MediaPipe** - Google's pose estimation framework (easiest to install)
 2. **Ultralytics YOLO** - Modern object detection with pose estimation
-3. **OpenPose** - Carnegie Mellon's pose estimation
+3. **OpenPose** - Carnegie Mellon's high-accuracy pose estimation (see docs/OPENPOSE_SETUP.md)
 
 All alternatives are installed with:
 ```bash
@@ -491,6 +491,7 @@ The AmbientPose CLI now supports multiple pose detection backends for maximum co
 
 - **MediaPipe**: Google's cross-platform pose detection (primary, most reliable)
 - **Ultralytics YOLO**: Modern YOLOv8-based pose detection (alternative)
+- **OpenPose**: Carnegie Mellon's high-accuracy pose estimation (recommended for research)
 - **AlphaPose**: Original backend (if properly installed)
 
 ### Quick Start
@@ -502,6 +503,8 @@ python cli/detect.py --image-dir path/to/images --backend auto
 # Use specific backend
 python cli/detect.py --video video.mp4 --backend mediapipe
 python cli/detect.py --image-dir images/ --backend ultralytics
+python cli/detect.py --video video.mp4 --backend openpose
+python cli/detect.py --image-dir images/ --backend alphapose
 
 # Test with Makefile
 make run-cli
@@ -517,7 +520,8 @@ python cli/detect.py --image-dir images/ --backend auto
 The CLI automatically selects backends in this priority order:
 1. **MediaPipe** (fastest, most reliable, works on all platforms)
 2. **Ultralytics YOLO** (good alternative with modern YOLO models)
-3. **AlphaPose** (if available and properly configured)
+3. **OpenPose** (high accuracy, requires proper installation)
+4. **AlphaPose** (if available and properly configured)
 
 #### Manual Backend Selection
 ```bash
@@ -526,6 +530,9 @@ python cli/detect.py --video video.mp4 --backend mediapipe
 
 # Force Ultralytics (good for object detection + pose)
 python cli/detect.py --image-dir images/ --backend ultralytics
+
+# Force OpenPose (best accuracy, requires OPENPOSE_HOME env var)
+python cli/detect.py --video video.mp4 --backend openpose
 
 # Force AlphaPose (if you need specific AlphaPose features)
 python cli/detect.py --video video.mp4 --backend alphapose
@@ -536,7 +543,7 @@ python cli/detect.py --video video.mp4 --backend alphapose
 ```bash
 usage: detect.py [-h] (--video VIDEO | --image-dir IMAGE_DIR) 
                  [--output OUTPUT] [--output-dir OUTPUT_DIR]
-                 [--backend {auto,mediapipe,ultralytics,alphapose}] 
+                 [--backend {auto,mediapipe,ultralytics,openpose,alphapose}] 
                  [--min-confidence MIN_CONFIDENCE] [--debug]
 
 options:
@@ -589,6 +596,7 @@ No pose detection backends available!
 Please install at least one of the following:
   - MediaPipe: pip install mediapipe
   - Ultralytics: pip install ultralytics
+  - OpenPose: Set OPENPOSE_HOME environment variable (see docs/OPENPOSE_SETUP.md)
   - AlphaPose: Follow instructions in docs/INSTALL.md
 ```
 
@@ -612,3 +620,74 @@ The server automatically uses the same CLI with proper backend selection:
 # Server calls CLI with auto backend selection
 cli_args = ["python", "cli/detect.py", "--video", video_path, "--backend", "auto"]
 ```
+
+## Prerequisites
+- Python 3.8+
+- pip or uv (recommended for dependency management)
+- [OpenCV](https://pypi.org/project/opencv-python/) (required for overlay video and frame analysis)
+- [NumPy](https://pypi.org/project/numpy/)
+- [loguru](https://pypi.org/project/loguru/)
+- [pytest](https://pypi.org/project/pytest/) (for running tests)
+
+## Backend-Specific Requirements
+- **MediaPipe**: `pip install mediapipe`
+- **Ultralytics YOLO**: `pip install ultralytics`
+- **OpenPose**:
+  - Set `OPENPOSE_HOME` environment variable to your OpenPose installation directory
+  - Ensure binaries are in the `bin/` subdirectory
+  - For Python API: build OpenPose with Python bindings
+  - See [OPENPOSE_SETUP.md](OPENPOSE_SETUP.md) for full details
+- **AlphaPose**:
+  - Follow instructions in `scripts/install_alphapose.py` or see [AlphaPose documentation](https://github.com/MVIG-SJTU/AlphaPose)
+  - Requires PyTorch, torchvision, and other dependencies
+
+## Installation Steps
+
+1. **Clone the repository**
+   ```sh
+   git clone https://github.com/your-org/ambientpose.git
+   cd ambientpose
+   ```
+
+2. **Install dependencies**
+   - Using pip:
+     ```sh
+     pip install -r docker/requirements.txt
+     pip install opencv-python loguru pytest
+     # Add backend-specific packages as needed
+     ```
+   - Using uv (recommended):
+     ```sh
+     uv pip install -r docker/requirements.txt
+     uv pip install opencv-python loguru pytest
+     # Add backend-specific packages as needed
+     ```
+
+3. **Set up backends**
+   - For OpenPose, set `OPENPOSE_HOME` and ensure binaries/models are present.
+   - For AlphaPose, run the setup scripts and download models as needed.
+
+4. **Verify installation**
+   - Run the CLI help to check available options:
+     ```sh
+     python cli/detect.py --help
+     ```
+   - Run the test suite:
+     ```sh
+     pytest tests/
+     ```
+
+## Environment Variables
+- `OPENPOSE_HOME`: Path to OpenPose installation (required for OpenPose backend)
+- `ALPHAPOSE_HOME`: (if used) Path to AlphaPose installation
+
+## Troubleshooting
+- If you see errors about missing dependencies, install the required Python packages.
+- For backend-specific errors, see the relevant documentation in the `docs/` folder.
+- For OpenPose/AlphaPose, ensure all environment variables and model files are correctly set up.
+
+## Advanced Features
+- Overlay video and comprehensive frame analysis require OpenCV and NumPy.
+- Toronto gait format and advanced outputs require no extra dependencies.
+
+See [ADVANCED_CLI.md](ADVANCED_CLI.md) for full CLI usage and examples.
