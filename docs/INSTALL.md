@@ -419,9 +419,9 @@ make run-server
 
 If AlphaPose continues to cause issues, the project supports these alternatives:
 
-1. **MediaPipe** - Google's pose estimation framework
+1. **MediaPipe** - Google's pose estimation framework (easiest to install)
 2. **Ultralytics YOLO** - Modern object detection with pose estimation
-3. **OpenPose** - Carnegie Mellon's pose estimation
+3. **OpenPose** - Carnegie Mellon's high-accuracy pose estimation (see docs/OPENPOSE_SETUP.md)
 
 All alternatives are installed with:
 ```bash
@@ -491,6 +491,7 @@ The AmbientPose CLI now supports multiple pose detection backends for maximum co
 
 - **MediaPipe**: Google's cross-platform pose detection (primary, most reliable)
 - **Ultralytics YOLO**: Modern YOLOv8-based pose detection (alternative)
+- **OpenPose**: Carnegie Mellon's high-accuracy pose estimation (recommended for research)
 - **AlphaPose**: Original backend (if properly installed)
 
 ### Quick Start
@@ -502,6 +503,8 @@ python cli/detect.py --image-dir path/to/images --backend auto
 # Use specific backend
 python cli/detect.py --video video.mp4 --backend mediapipe
 python cli/detect.py --image-dir images/ --backend ultralytics
+python cli/detect.py --video video.mp4 --backend openpose
+python cli/detect.py --image-dir images/ --backend alphapose
 
 # Test with Makefile
 make run-cli
@@ -517,7 +520,8 @@ python cli/detect.py --image-dir images/ --backend auto
 The CLI automatically selects backends in this priority order:
 1. **MediaPipe** (fastest, most reliable, works on all platforms)
 2. **Ultralytics YOLO** (good alternative with modern YOLO models)
-3. **AlphaPose** (if available and properly configured)
+3. **OpenPose** (high accuracy, requires proper installation)
+4. **AlphaPose** (if available and properly configured)
 
 #### Manual Backend Selection
 ```bash
@@ -526,6 +530,9 @@ python cli/detect.py --video video.mp4 --backend mediapipe
 
 # Force Ultralytics (good for object detection + pose)
 python cli/detect.py --image-dir images/ --backend ultralytics
+
+# Force OpenPose (best accuracy, requires OPENPOSE_HOME env var)
+python cli/detect.py --video video.mp4 --backend openpose
 
 # Force AlphaPose (if you need specific AlphaPose features)
 python cli/detect.py --video video.mp4 --backend alphapose
@@ -536,7 +543,7 @@ python cli/detect.py --video video.mp4 --backend alphapose
 ```bash
 usage: detect.py [-h] (--video VIDEO | --image-dir IMAGE_DIR) 
                  [--output OUTPUT] [--output-dir OUTPUT_DIR]
-                 [--backend {auto,mediapipe,ultralytics,alphapose}] 
+                 [--backend {auto,mediapipe,ultralytics,openpose,alphapose}] 
                  [--min-confidence MIN_CONFIDENCE] [--debug]
 
 options:
@@ -589,6 +596,7 @@ No pose detection backends available!
 Please install at least one of the following:
   - MediaPipe: pip install mediapipe
   - Ultralytics: pip install ultralytics
+  - OpenPose: Set OPENPOSE_HOME environment variable (see docs/OPENPOSE_SETUP.md)
   - AlphaPose: Follow instructions in docs/INSTALL.md
 ```
 

@@ -15,7 +15,7 @@ AmbientPose is designed with SOLID principles, strong typing, automated tests, a
 ## 2. Key Features & Capabilities
 | Area | Highlights |
 |------|------------|
-| Pose Estimation | Multi-person whole-body (136-keypoint) support powered by AlphaPose |
+| Pose Estimation | Multi-backend support: MediaPipe, Ultralytics YOLO, OpenPose, and AlphaPose |
 | Input Sources  | Local videos, image folders, or remote URLs |
 | Outputs | • Per-video JSON with all poses<br>• Frame dumps (`frames/…`) <br>• Overlay images with keypoints (`overlay/…`) |
 | Automation | Async FastAPI server shells out to CLI via robust `asyncio` subprocesses |
@@ -117,11 +117,17 @@ python detect.py --video sample.mp4
 ### 7.1 CLI
 
 ```bash
-# Process a single video with defaults
-python detect.py --video dance.mp4
+# Process a single video with auto backend selection
+python cli/detect.py --video dance.mp4 --backend auto
+
+# Use specific backends
+python cli/detect.py --video dance.mp4 --backend mediapipe    # Fast & reliable
+python cli/detect.py --video dance.mp4 --backend ultralytics # Modern YOLO
+python cli/detect.py --video dance.mp4 --backend openpose    # High accuracy
+python cli/detect.py --video dance.mp4 --backend alphapose   # Original backend
 
 # Images folder with explicit output filename
-python detect.py --image-dir ./images --output outputs/pose_images_run1.json
+python cli/detect.py --image-dir ./images --output outputs/pose_images_run1.json --backend auto
 ```
 
 ### 7.2 API

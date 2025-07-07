@@ -41,31 +41,31 @@ dependencies = [
   "ultralytics>=8.0.0", # YOLOv8/YOLO11 for object detection
   "mediapipe>=0.10.0", # Google MediaPipe for pose/hand/face detection
   # AlphaPose Dependencies (installed separately due to build complexity)
-  "easydict>=1.10",    # Configuration management for AlphaPose
-  "yacs>=0.1.8",       # Yet Another Configuration System
+  "easydict>=1.10", # Configuration management for AlphaPose
+  "yacs>=0.1.8", # Yet Another Configuration System
   "tensorboardx>=2.6", # TensorBoard logging support
-  "scipy>=1.10.0",     # Scientific computing for pose processing
+  "scipy>=1.10.0", # Scientific computing for pose processing
   "matplotlib>=3.7.0", # Plotting and visualization
   # AlphaPose (Optional) -----------------------------------------------
-# NOTE: AlphaPose depends on NumPy during its *build* step which causes
-# front-loading issues with most build back-ends (and `uv sync`).  To
-# keep the core environment resolvable, AlphaPose must be installed 
-# **after** the base environment is ready.
-#
-# INSTALLATION INSTRUCTIONS:
-# 1. First complete the base installation: `uv sync`
-# 2. Then install AlphaPose manually:
-#    uv pip install "alphapose @ git+https://github.com/MVIG-SJTU/AlphaPose"
-#
-# ALTERNATIVE (if compilation fails on Windows):
-# 3. Use the local AlphaPose directory approach:
-#    - Ensure ./AlphaPose directory exists with the AlphaPose source code
-#    - Set ALPHAPOSE_ROOT=./AlphaPose in your .env file
-#    - The CLI will automatically detect and use AlphaPose from the local directory
-#
-# The CLI automatically detects if AlphaPose is available and falls back
-# to MediaPipe or Ultralytics if not. For most use cases, MediaPipe 
-# provides excellent pose detection without the complexity of AlphaPose.
+  # NOTE: AlphaPose depends on NumPy during its *build* step which causes
+  # front-loading issues with most build back-ends (and `uv sync`).  To
+  # keep the core environment resolvable, AlphaPose must be installed
+  # **after** the base environment is ready.
+  #
+  # INSTALLATION INSTRUCTIONS:
+  # 1. First complete the base installation: `uv sync`
+  # 2. Then install AlphaPose manually:
+  #    uv pip install "alphapose @ git+https://github.com/MVIG-SJTU/AlphaPose"
+  #
+  # ALTERNATIVE (if compilation fails on Windows):
+  # 3. Use the local AlphaPose directory approach:
+  #    - Ensure ./AlphaPose directory exists with the AlphaPose source code
+  #    - Set ALPHAPOSE_ROOT=./AlphaPose in your .env file
+  #    - The CLI will automatically detect and use AlphaPose from the local directory
+  #
+  # The CLI automatically detects if AlphaPose is available and falls back
+  # to MediaPipe or Ultralytics if not. For most use cases, MediaPipe
+  # provides excellent pose detection without the complexity of AlphaPose.
   # Utilities
   "loguru==0.7.2",
   "python-dotenv==1.0.1",
