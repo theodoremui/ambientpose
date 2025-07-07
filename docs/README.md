@@ -49,7 +49,7 @@ All components are decoupled and communicate via well-defined HTTP/JSON contract
 
 ```bash
 # 1. Clone & enter repo
-git clone https://github.com/philmui/ambientpost.git
+git clone https://github.com/theodoremui/ambientpost.git
 cd ambientpost
 
 # 2. Create environment
@@ -190,3 +190,67 @@ AmbientPost is released under the **MIT License**.
 See [`LICENSE`](../LICENSE) for full text.
 
 Commercial use of AlphaPose models may require additional licensing – refer to the original AlphaPose repository.
+
+# AmbientPose
+
+AmbientPose is a multi-backend human pose detection toolkit supporting MediaPipe, Ultralytics YOLO, OpenPose, and AlphaPose. It provides a unified CLI for pose extraction from videos and images, with advanced options for research and production workflows.
+
+## Features
+- Multi-backend support: MediaPipe, Ultralytics YOLO, OpenPose, AlphaPose
+- Automatic backend selection or manual override
+- Advanced CLI options:
+  - `--confidence-threshold` / `--min-confidence`: Set detection confidence
+  - `--net-resolution`: Set network input resolution (backend-specific)
+  - `--model-pose`: Select pose model (backend-specific)
+  - `--overlay-video`: Generate overlay video with pose skeletons
+  - `--toronto-gait-format`: Output Toronto gait analysis JSON
+  - `--extract-comprehensive-frames`: Save detailed per-frame analysis
+  - `--verbose`: Enable detailed logging
+- Output formats: JSON, CSV, overlay video (MP4), Toronto gait JSON, comprehensive frame JSON
+- Robust error handling and clear installation guidance
+- Extensible, OOP, and DRY codebase
+
+## Quick Start
+
+```sh
+python cli/detect.py \
+    --video path/to/video.mp4 \
+    --output outputs/pose_results.json \
+    --backend openpose \
+    --confidence-threshold 0.3 \
+    --net-resolution 656x368 \
+    --model-pose COCO \
+    --overlay-video outputs/overlay.mp4 \
+    --toronto-gait-format \
+    --extract-comprehensive-frames \
+    --verbose
+```
+
+## Backend-Specific Options
+
+| Option                   | MediaPipe | Ultralytics | OpenPose         | AlphaPose        |
+|-------------------------|-----------|-------------|------------------|------------------|
+| --net-resolution        | (auto)    | yes         | yes              | yes (limited)    |
+| --model-pose            | (fixed)   | yes         | yes              | yes              |
+| --overlay-video         | yes       | yes         | yes              | yes              |
+| --toronto-gait-format   | yes       | yes         | yes              | yes              |
+| --extract-comprehensive-frames | yes | yes         | yes              | yes              |
+
+See `docs/ADVANCED_CLI.md` for full details and backend-specific notes.
+
+## Outputs
+- **JSON**: Standardized pose data
+- **CSV**: Per-joint pose data
+- **Overlay video**: MP4 with pose skeletons
+- **Toronto gait JSON**: Gait analysis for research
+- **Comprehensive frames JSON**: Per-frame statistics and pose quality
+
+## Documentation
+- [INSTALL.md](INSTALL.md): Installation and setup
+- [OPENPOSE_SETUP.md](OPENPOSE_SETUP.md): OpenPose backend setup
+- [ADVANCED_CLI.md](ADVANCED_CLI.md): Full CLI reference and examples
+- [BACKEND_SPECIFIC.md](BACKEND_SPECIFIC.md): Backend feature matrix
+
+## Troubleshooting
+- See CLI error messages for guidance on missing dependencies or invalid options.
+- For backend-specific issues, see the relevant docs in the `docs/` folder.

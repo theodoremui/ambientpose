@@ -308,6 +308,51 @@ params = {
 }
 ```
 
+### OpenPose Backend Setup
+
+## Requirements
+- OpenPose installed (Windows or Linux)
+- Set `OPENPOSE_HOME` environment variable to your OpenPose installation directory
+- Binaries must be in the `bin/` subdirectory
+- For Python API: build OpenPose with Python bindings (recommended for best performance)
+
+## Example Usage with Advanced CLI Options
+
+```sh
+python cli/detect.py \
+    --video path/to/video.mp4 \
+    --backend openpose \
+    --confidence-threshold 0.3 \
+    --net-resolution 832x512 \
+    --model-pose BODY_25 \
+    --overlay-video outputs/openpose_overlay.mp4 \
+    --toronto-gait-format \
+    --extract-comprehensive-frames \
+    --verbose
+```
+
+## OpenPose-Specific Options
+- `--net-resolution`: Controls the internal network input size. Higher values increase accuracy but reduce speed. Format: `WIDTHxHEIGHT` (e.g., `656x368`, `832x512`).
+- `--model-pose`: Selects the pose model. Options: `BODY_25` (default), `COCO`, `MPI`, `MPI_4_layers`.
+- `--overlay-video`: Saves an MP4 video with pose skeleton overlays.
+- All other advanced options are supported.
+
+## Notes
+- If you use the Python API, the CLI will use it automatically if available. Otherwise, it falls back to the OpenPose binary.
+- The CLI will warn and fall back to another backend if OpenPose is not available or misconfigured.
+- For best results, use a GPU with at least 6GB VRAM.
+
+## Troubleshooting
+- **OpenPose not detected**: Ensure `OPENPOSE_HOME` is set and points to the correct directory. Binaries must be in `bin/`.
+- **Python bindings not found**: Build OpenPose with Python support, or use the binary fallback.
+- **Invalid net resolution**: Use a valid format (e.g., `656x368`).
+- **Model not supported**: Use one of the supported models (`BODY_25`, `COCO`, `MPI`, `MPI_4_layers`).
+- **Overlay video not saved**: Ensure OpenCV is installed and the output path is writable.
+
+## See Also
+- [ADVANCED_CLI.md](ADVANCED_CLI.md) for full CLI reference
+- [BACKEND_SPECIFIC.md](BACKEND_SPECIFIC.md) for backend feature matrix
+
 ---
 
 ## 6. Performance Optimization

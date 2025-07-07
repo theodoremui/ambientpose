@@ -76,6 +76,8 @@ dependencies = [
   "torchvision>=0.17.0",
   "cython>=3.1.2",
   "setuptools>=80.9.0",
+  "pytest>=8.2.0",
+  "pytest-asyncio>=0.23.5",
 ]
 
 [project.urls]

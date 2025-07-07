@@ -6,6 +6,7 @@ This tool provides pose detection capabilities using multiple backends:
 - MediaPipe (primary, most reliable)
 - Ultralytics YOLO (alternative)
 - AlphaPose (if available)
+- OpenPose (if available: check env var OPENPOSE_HOME)
 
 Author: Theodore Mui
 Email: theodoremui@gmail.com
@@ -157,7 +158,18 @@ except Exception as e:
 
 
 class AmbientPoseConfig:
-    """Configuration for AmbientPose CLI."""
+    """
+    Configuration for AmbientPose CLI.
+
+    Handles all CLI options, advanced parameters, validation, and logging.
+    Supports backend-specific defaults and overrides for:
+      - net_resolution
+      - model_pose
+      - overlay_video_path
+      - toronto_gait_format
+      - extract_comprehensive_frames
+      - verbose/debug
+    """
     
     # Default paths
     DEFAULT_OUTPUT_DIR = Path("outputs")
@@ -1784,7 +1796,17 @@ def convert_pose_to_joints_format(pose: Dict[str, Any], frame_number: int, times
 
 
 class PoseDetector:
-    """Main pose detector that manages different backends."""
+    """
+    Main pose detector that manages different backends and advanced output options.
+
+    Supports:
+      - Video and image directory input
+      - Backend selection and fallback
+      - Overlay video generation
+      - Toronto gait format output
+      - Comprehensive frame extraction
+      - Verbose and debug logging
+    """
     
     def __init__(self, config: AmbientPoseConfig):
         """Initialize the pose detector with the best available backend."""
@@ -2377,10 +2399,228 @@ class PoseDetector:
         
         logger.success(f"Toronto gait format saved: {len(gait_analysis)} people analyzed")
         logger.success(f"Toronto gait output: {toronto_path}")
+    
+    def _extract_comprehensive_frame_data(self, frame: np.ndarray, frame_idx: int, timestamp: float, poses: List[Dict[str, Any]]) -> None:
+        """Extract comprehensive frame analysis data."""
+        import numpy as np
+        
+        height, width = frame.shape[:2]
+        
+        # Basic frame statistics
+        frame_stats = {
+            'brightness': float(np.mean(frame)),
+            'contrast': float(np.std(frame)),
+            'sharpness': self._calculate_sharpness(frame),
+            'motion_blur': self._calculate_motion_blur(frame, frame_idx)
+        }
+        
+        # Pose analysis
+        pose_analysis = {
+            'total_poses': len(poses),
+            'confidence_scores': [pose['score'] for pose in poses],
+            'bounding_boxes': [pose['bbox'] for pose in poses],
+            'pose_quality_metrics': []
+        }
+        
+        # Calculate pose quality metrics
+        for pose in poses:
+            keypoints = pose['keypoints']
+            valid_keypoints = sum(1 for kp in keypoints if kp[2] > 0.1)  # confidence > 0.1
+            total_keypoints = len(keypoints)
+            
+            # Calculate pose completeness
+            completeness = valid_keypoints / total_keypoints if total_keypoints > 0 else 0
+            
+            # Calculate keypoint spread (how well distributed the keypoints are)
+            valid_kps = [kp for kp in keypoints if kp[2] > 0.1]
+            if len(valid_kps) > 1:
+                x_coords = [kp[0] for kp in valid_kps]
+                y_coords = [kp[1] for kp in valid_kps]
+                x_spread = max(x_coords) - min(x_coords)
+                y_spread = max(y_coords) - min(y_coords)
+                spread_ratio = (x_spread * y_spread) / (width * height)
+            else:
+                spread_ratio = 0
+            
+            # Calculate average confidence
+            avg_confidence = sum(kp[2] for kp in valid_kps) / len(valid_kps) if valid_kps else 0
+            
+            pose_quality = {
+                'completeness': round(completeness, 4),
+                'spread_ratio': round(spread_ratio, 6),
+                'average_confidence': round(avg_confidence, 4),
+                'valid_keypoints': valid_keypoints,
+                'total_keypoints': total_keypoints
+            }
+            pose_analysis['pose_quality_metrics'].append(pose_quality)
+        
+        # Motion analysis (if previous frame exists)
+        motion_analysis = None
+        if frame_idx > 0 and hasattr(self, '_previous_frame'):
+            motion_analysis = self._calculate_frame_motion(self._previous_frame, frame)
+        
+        # Store current frame for next iteration
+        self._previous_frame = frame.copy()
+        
+        # Comprehensive frame data
+        comprehensive_data = {
+            'frame_number': frame_idx,
+            'timestamp': timestamp,
+            'frame_statistics': frame_stats,
+            'pose_analysis': pose_analysis,
+            'motion_analysis': motion_analysis,
+            'processing_metadata': {
+                'backend': self.backend_name,
+                'frame_dimensions': {'width': width, 'height': height},
+                'extracted_at': timestamp
+            }
+        }
+        
+        self.comprehensive_frame_data.append(comprehensive_data)
+        
+        # Save individual frame analysis if verbose
+        if self.config.verbose and frame_idx % 30 == 0:  # Log every 30 frames
+            logger.debug(f"Frame {frame_idx}: {len(poses)} poses, avg confidence: {np.mean(pose_analysis['confidence_scores']) if pose_analysis['confidence_scores'] else 0:.3f}")
+    
+    def _calculate_sharpness(self, frame: np.ndarray) -> float:
+        """Calculate frame sharpness using Laplacian variance."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        return float(laplacian.var())
+    
+    def _calculate_motion_blur(self, frame: np.ndarray, frame_idx: int) -> float:
+        """Estimate motion blur in the frame."""
+        if frame_idx == 0:
+            return 0.0
+        
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+        
+        # Use FFT to detect motion blur
+        f_transform = np.fft.fft2(gray)
+        f_shift = np.fft.fftshift(f_transform)
+        magnitude_spectrum = np.log(np.abs(f_shift) + 1)
+        
+        # Calculate the ratio of high-frequency to low-frequency components
+        h, w = magnitude_spectrum.shape
+        center_h, center_w = h // 2, w // 2
+        
+        # Define regions
+        low_freq_region = magnitude_spectrum[center_h-10:center_h+10, center_w-10:center_w+10]
+        high_freq_region = magnitude_spectrum[0:20, 0:20]  # Corner region
+        
+        low_freq_energy = np.mean(low_freq_region)
+        high_freq_energy = np.mean(high_freq_region)
+        
+        # Motion blur indicator (higher value = more blur)
+        blur_ratio = low_freq_energy / (high_freq_energy + 1e-6)
+        return float(blur_ratio)
+    
+    def _calculate_frame_motion(self, prev_frame: np.ndarray, curr_frame: np.ndarray) -> Dict[str, Any]:
+        """Calculate motion between consecutive frames."""
+        prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
+        curr_gray = cv2.cvtColor(curr_frame, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate optical flow
+        flow = cv2.calcOpticalFlowPyrLK(
+            prev_gray, curr_gray,
+            np.array([[100, 100]], dtype=np.float32),  # Single point for overall motion
+            None
+        )
+        
+        # Calculate frame difference
+        diff = cv2.absdiff(prev_gray, curr_gray)
+        motion_magnitude = float(np.mean(diff))
+        
+        # Calculate histogram correlation
+        hist_prev = cv2.calcHist([prev_gray], [0], None, [256], [0, 256])
+        hist_curr = cv2.calcHist([curr_gray], [0], None, [256], [0, 256])
+        correlation = cv2.compareHist(hist_prev, hist_curr, cv2.HISTCMP_CORREL)
+        
+        return {
+            'motion_magnitude': round(motion_magnitude, 4),
+            'histogram_correlation': round(float(correlation), 4),
+            'frame_similarity': round(1.0 - (motion_magnitude / 255.0), 4)
+        }
+    
+    def save_comprehensive_frame_analysis(self) -> None:
+        """Save comprehensive frame analysis to JSON file."""
+        if not self.comprehensive_frame_data:
+            return
+        
+        # Generate comprehensive analysis filename
+        analysis_filename = self.config.output_json.stem + "_comprehensive_frames.json"
+        analysis_path = self.config.output_json.parent / analysis_filename
+        
+        logger.info(f"Saving comprehensive frame analysis to {analysis_path}")
+        
+        from datetime import datetime
+        
+        # Calculate summary statistics
+        total_frames = len(self.comprehensive_frame_data)
+        total_poses = sum(data['pose_analysis']['total_poses'] for data in self.comprehensive_frame_data)
+        avg_poses_per_frame = total_poses / total_frames if total_frames > 0 else 0
+        
+        all_confidences = []
+        for data in self.comprehensive_frame_data:
+            all_confidences.extend(data['pose_analysis']['confidence_scores'])
+        
+        avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0
+        
+        # Build comprehensive analysis result
+        analysis_result = {
+            'metadata': {
+                'format': 'AmbientPose Comprehensive Frame Analysis v1.0',
+                'input_file': str(self.config.input_path).replace('/', '\\'),
+                'generated_at': datetime.now().isoformat(),
+                'backend': self.backend_name,
+                'processing_parameters': {
+                    'confidence_threshold': self.config.min_confidence,
+                    'net_resolution': getattr(self.config, 'net_resolution', None),
+                    'model_pose': getattr(self.config, 'model_pose', None),
+                    'comprehensive_extraction': True
+                },
+                'video_metadata': self.video_metadata
+            },
+            'summary': {
+                'total_frames_analyzed': total_frames,
+                'total_poses_detected': total_poses,
+                'average_poses_per_frame': round(avg_poses_per_frame, 4),
+                'average_pose_confidence': round(avg_confidence, 4),
+                'analysis_completeness': 100.0  # Always 100% for processed frames
+            },
+            'frame_analysis': self.comprehensive_frame_data
+        }
+        
+        # Save comprehensive analysis JSON
+        with open(analysis_path, 'w') as f:
+            json.dump(analysis_result, f, indent=2)
+        
+        logger.success(f"Comprehensive frame analysis saved: {total_frames} frames analyzed")
+        logger.success(f"Comprehensive analysis output: {analysis_path}")
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+    """
+    Parse command line arguments for AmbientPose CLI.
+
+    Options:
+      --video <path>                   Path to input video file
+      --image-dir <path>               Path to directory of input images
+      --output <path>                  Path to output JSON file (default: outputs/pose_<timestamp>.json)
+      --output-dir <path>              Directory for output files (default: outputs)
+      --backend <name>                 Backend to use: auto, mediapipe, ultralytics, openpose, alphapose (default: auto)
+      --min-confidence <float>         Minimum confidence threshold for detections (default: 0.5)
+      --confidence-threshold <float>   Alias for --min-confidence (OpenPose compatibility)
+      --net-resolution <WxH>           Network input resolution (e.g., 656x368, 832x512)
+      --model-pose <name>              Pose model to use (backend-specific: COCO, BODY_25, MPI, etc.)
+      --overlay-video <path>           Path to save overlay video file (MP4 format)
+      --toronto-gait-format            Output results in Toronto gait analysis format
+      --extract-comprehensive-frames   Extract comprehensive frame metadata and analysis
+      --debug                          Enable debug mode
+      --verbose                        Enable verbose logging with detailed information
+
+    See docs/ADVANCED_CLI.md for full details and backend-specific notes.
+    """
     parser = argparse.ArgumentParser(
         description='AmbientPose: Multi-backend pose detection tool',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -2467,12 +2707,26 @@ def main() -> int:
         if config.toronto_gait_format:
             detector.save_toronto_gait_format(poses)
         
+        # Save comprehensive frame analysis if requested
+        if config.extract_comprehensive_frames:
+            detector.save_comprehensive_frame_analysis()
+        
         # Print summary
         elapsed_time = time.time() - start_time
         logger.success(f"Processing completed in {elapsed_time:.4f} seconds")
         logger.success(f"Output saved to: {config.output_json}")
         logger.success(f"Frames saved to: {config.frames_dir}")
         logger.success(f"Overlays saved to: {config.overlay_dir}")
+        
+        # Report additional outputs
+        if config.overlay_video_path:
+            logger.success(f"Overlay video saved to: {config.overlay_video_path}")
+        if config.toronto_gait_format:
+            toronto_path = config.output_json.parent / (config.output_json.stem + "_toronto_gait.json")
+            logger.success(f"Toronto gait analysis saved to: {toronto_path}")
+        if config.extract_comprehensive_frames:
+            analysis_path = config.output_json.parent / (config.output_json.stem + "_comprehensive_frames.json")
+            logger.success(f"Comprehensive frame analysis saved to: {analysis_path}")
         
         return 0
         
