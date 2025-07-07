@@ -1224,14 +1224,42 @@ class OpenPoseDetector:
         
         self.config = config
         
+        # Get backend-specific configuration
+        self.backend_config = config.get_backend_config('openpose')
+        
         # Get OpenPose installation path
         self.openpose_home = Path(os.environ.get('OPENPOSE_HOME', ''))
         self.openpose_bin_path = self.openpose_home / "bin"
         
+        # Parse network resolution
+        self.net_resolution = "656x368"  # Default
+        if config.net_resolution:
+            try:
+                width, height = map(int, config.net_resolution.split('x'))
+                self.net_resolution = f"{width}x{height}"
+                if config.verbose:
+                    logger.info(f"OpenPose network resolution: {self.net_resolution}")
+            except (ValueError, AttributeError):
+                logger.warning(f"Invalid net-resolution for OpenPose: {config.net_resolution}, using default")
+        
+        # Parse pose model
+        self.pose_model = config.model_pose if config.model_pose else 'BODY_25'
+        valid_models = ['COCO', 'BODY_25', 'MPI', 'MPI_4_layers']
+        if self.pose_model not in valid_models:
+            if config.verbose:
+                logger.warning(f"Model '{self.pose_model}' not in valid OpenPose models: {valid_models}")
+                logger.info(f"Falling back to BODY_25")
+            self.pose_model = 'BODY_25'
+        
         # Initialize OpenPose
         self._init_openpose()
         
-        logger.info("OpenPose detector initialized")
+        if config.verbose:
+            logger.info(f"OpenPose detector initialized")
+            logger.info(f"Pose model: {self.pose_model}")
+            logger.info(f"Network resolution: {self.net_resolution}")
+        else:
+            logger.info("OpenPose detector initialized")
     
     def _init_openpose(self):
         """Initialize OpenPose with appropriate method (Python bindings or subprocess)."""
@@ -1262,8 +1290,8 @@ class OpenPoseDetector:
                     self.params["model_folder"] = str(self.openpose_home / "models")
                     self.params["face"] = False
                     self.params["hand"] = False
-                    self.params["net_resolution"] = "656x368"  # Good balance of speed/accuracy
-                    self.params["model_pose"] = "BODY_25"  # COCO format: BODY_25, COCO, MPI
+                    self.params["net_resolution"] = self.net_resolution
+                    self.params["model_pose"] = self.pose_model
                     
                     # Create OpenPose wrapper
                     self.opWrapper = op.WrapperPython()
