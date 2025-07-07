@@ -698,6 +698,33 @@ class AlphaPoseDetector:
         
         self.config = config
         
+        # Get backend-specific configuration
+        self.backend_config = config.get_backend_config('alphapose')
+        
+        # Parse network resolution (AlphaPose uses this for pose model resolution)
+        self.net_resolution = "256x192"  # Default for AlphaPose
+        if config.net_resolution:
+            try:
+                width, height = map(int, config.net_resolution.split('x'))
+                # AlphaPose typically uses specific resolutions like 256x192, 384x288
+                if f"{width}x{height}" in ["256x192", "384x288", "320x256"]:
+                    self.net_resolution = f"{width}x{height}"
+                    if config.verbose:
+                        logger.info(f"AlphaPose network resolution: {self.net_resolution}")
+                else:
+                    if config.verbose:
+                        logger.warning(f"AlphaPose resolution {width}x{height} not standard, using 256x192")
+            except (ValueError, AttributeError):
+                logger.warning(f"Invalid net-resolution for AlphaPose: {config.net_resolution}, using default")
+        
+        # Parse pose model
+        self.pose_model = config.model_pose if config.model_pose else 'COCO'
+        valid_models = ['COCO', 'HALPE_26', 'HALPE_136', 'MPII']
+        if self.pose_model not in valid_models:
+            if config.verbose:
+                logger.warning(f"Model '{self.pose_model}' not in standard AlphaPose models: {valid_models}")
+                logger.info(f"Using '{self.pose_model}' as custom model")
+        
         # Set up device
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {self.device}")
@@ -1425,8 +1452,8 @@ class OpenPoseDetector:
                     "--display", "0",
                     "--render_pose", "0",
                     "--model_folder", str(self.models_path),
-                    "--net_resolution", "656x368",
-                    "--model_pose", "BODY_25"
+                    "--net_resolution", self.net_resolution,
+                    "--model_pose", self.pose_model
                 ]
                 
                 # Run OpenPose
@@ -1766,6 +1793,7 @@ class PoseDetector:
         self.person_tracker = PersonTracker()
         self.video_metadata = {}
         self.all_converted_poses = []  # Store poses in the new format
+        self.comprehensive_frame_data = []  # Store comprehensive frame analysis
         
         # Select backend
         if config.backend == "auto":
@@ -1886,6 +1914,20 @@ class PoseDetector:
         # Process frames
         all_poses = []
         frame_idx = 0
+        overlay_frames = []  # Store overlay frames for video generation
+        
+        # Set up overlay video writer if requested
+        overlay_video_writer = None
+        if self.config.overlay_video_path:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            overlay_video_writer = cv2.VideoWriter(
+                self.config.overlay_video_path, 
+                fourcc, 
+                fps, 
+                (width, height)
+            )
+            if self.config.verbose:
+                logger.info(f"Overlay video writer initialized: {self.config.overlay_video_path}")
         
         with logger.contextualize(video=video_path):
             while True:
@@ -1915,13 +1957,29 @@ class PoseDetector:
                     converted_pose = convert_pose_to_joints_format(pose, frame_idx, timestamp)
                     self.all_converted_poses.append(converted_pose)
                 
+                # Comprehensive frame extraction if requested
+                if self.config.extract_comprehensive_frames:
+                    self._extract_comprehensive_frame_data(frame, frame_idx, timestamp, tracked_poses)
+                
                 # Draw and save overlay frame
                 overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses)
                 cv2.imwrite(str(self.config.overlay_dir / frame_filename), overlay_frame)
                 
+                # Add frame to overlay video if requested
+                if overlay_video_writer is not None:
+                    overlay_video_writer.write(overlay_frame)
+                
                 frame_idx += 1
         
         cap.release()
+        
+        # Finalize overlay video
+        if overlay_video_writer is not None:
+            overlay_video_writer.release()
+            if self.config.verbose:
+                logger.success(f"Overlay video saved: {self.config.overlay_video_path}")
+            else:
+                logger.info(f"Overlay video saved: {self.config.overlay_video_path}")
         logger.info(f"Video processing complete: {frame_idx} frames processed, {len(all_poses)} poses detected")
         
         return all_poses
@@ -2138,6 +2196,187 @@ class PoseDetector:
         total_rows = sum(len(pose['joints']) for pose in self.all_converted_poses)
         logger.success(f"CSV saved: {total_rows} joint records across {len(self.all_converted_poses)} poses")
         logger.success(f"CSV output: {csv_path}")
+    
+    def save_toronto_gait_format(self, poses: List[Dict[str, Any]]) -> None:
+        """Save pose detection results in Toronto gait analysis format."""
+        # Generate Toronto gait filename
+        toronto_filename = self.config.output_json.stem + "_toronto_gait.json"
+        toronto_path = self.config.output_json.parent / toronto_filename
+        
+        logger.info(f"Saving Toronto gait format to {toronto_path}")
+        
+        from datetime import datetime
+        
+        # Organize data by person_id and frame
+        gait_data = {}
+        for pose in self.all_converted_poses:
+            person_id = pose['person_id']
+            frame_number = pose['frame_number']
+            
+            if person_id not in gait_data:
+                gait_data[person_id] = {}
+            
+            if frame_number not in gait_data[person_id]:
+                gait_data[person_id][frame_number] = {
+                    'timestamp': pose['timestamp'],
+                    'joints': {}
+                }
+            
+            # Store joints with focus on gait-relevant keypoints
+            for joint in pose['joints']:
+                joint_name = joint['name']
+                gait_data[person_id][frame_number]['joints'][joint_name] = {
+                    'x': joint['keypoint']['x'],
+                    'y': joint['keypoint']['y'],
+                    'confidence': joint['keypoint']['confidence']
+                }
+        
+        # Calculate gait metrics for each person
+        gait_analysis = []
+        for person_id, person_data in gait_data.items():
+            frames = sorted(person_data.keys())
+            if len(frames) < 10:  # Need minimum frames for gait analysis
+                continue
+            
+            # Extract key gait landmarks over time
+            left_hip_positions = []
+            right_hip_positions = []
+            left_knee_positions = []
+            right_knee_positions = []
+            left_ankle_positions = []
+            right_ankle_positions = []
+            timestamps = []
+            
+            for frame in frames:
+                frame_data = person_data[frame]
+                joints = frame_data['joints']
+                timestamps.append(frame_data['timestamp'])
+                
+                # Extract positions for gait analysis
+                if 'left_hip' in joints:
+                    left_hip_positions.append([joints['left_hip']['x'], joints['left_hip']['y']])
+                else:
+                    left_hip_positions.append([0, 0])
+                
+                if 'right_hip' in joints:
+                    right_hip_positions.append([joints['right_hip']['x'], joints['right_hip']['y']])
+                else:
+                    right_hip_positions.append([0, 0])
+                
+                if 'left_knee' in joints:
+                    left_knee_positions.append([joints['left_knee']['x'], joints['left_knee']['y']])
+                else:
+                    left_knee_positions.append([0, 0])
+                
+                if 'right_knee' in joints:
+                    right_knee_positions.append([joints['right_knee']['x'], joints['right_knee']['y']])
+                else:
+                    right_knee_positions.append([0, 0])
+                
+                if 'left_ankle' in joints:
+                    left_ankle_positions.append([joints['left_ankle']['x'], joints['left_ankle']['y']])
+                else:
+                    left_ankle_positions.append([0, 0])
+                
+                if 'right_ankle' in joints:
+                    right_ankle_positions.append([joints['right_ankle']['x'], joints['right_ankle']['y']])
+                else:
+                    right_ankle_positions.append([0, 0])
+            
+            # Calculate basic gait metrics
+            def calculate_stride_length(positions):
+                """Calculate approximate stride length from ankle positions."""
+                if len(positions) < 2:
+                    return 0
+                distances = []
+                for i in range(1, len(positions)):
+                    if positions[i][0] != 0 and positions[i][1] != 0 and positions[i-1][0] != 0 and positions[i-1][1] != 0:
+                        dx = positions[i][0] - positions[i-1][0]
+                        dy = positions[i][1] - positions[i-1][1]
+                        distances.append((dx**2 + dy**2)**0.5)
+                return sum(distances) / len(distances) if distances else 0
+            
+            def calculate_step_frequency(positions, timestamps):
+                """Calculate step frequency from position changes."""
+                if len(positions) < 3 or len(timestamps) < 3:
+                    return 0
+                
+                # Find peaks in vertical movement (y-axis)
+                y_positions = [pos[1] for pos in positions if pos[1] != 0]
+                if len(y_positions) < 3:
+                    return 0
+                
+                peaks = 0
+                for i in range(1, len(y_positions) - 1):
+                    if y_positions[i] > y_positions[i-1] and y_positions[i] > y_positions[i+1]:
+                        peaks += 1
+                
+                duration = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 1
+                return peaks / duration if duration > 0 else 0
+            
+            left_stride_length = calculate_stride_length(left_ankle_positions)
+            right_stride_length = calculate_stride_length(right_ankle_positions)
+            left_step_frequency = calculate_step_frequency(left_ankle_positions, timestamps)
+            right_step_frequency = calculate_step_frequency(right_ankle_positions, timestamps)
+            
+            person_analysis = {
+                'person_id': person_id,
+                'total_frames': len(frames),
+                'duration_seconds': timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 0,
+                'gait_metrics': {
+                    'stride_length': {
+                        'left': round(left_stride_length, 4),
+                        'right': round(right_stride_length, 4),
+                        'asymmetry': round(abs(left_stride_length - right_stride_length), 4)
+                    },
+                    'step_frequency': {
+                        'left': round(left_step_frequency, 4),
+                        'right': round(right_step_frequency, 4),
+                        'asymmetry': round(abs(left_step_frequency - right_step_frequency), 4)
+                    }
+                },
+                'raw_data': {
+                    'timestamps': timestamps,
+                    'joint_trajectories': {
+                        'left_hip': left_hip_positions,
+                        'right_hip': right_hip_positions,
+                        'left_knee': left_knee_positions,
+                        'right_knee': right_knee_positions,
+                        'left_ankle': left_ankle_positions,
+                        'right_ankle': right_ankle_positions
+                    }
+                }
+            }
+            gait_analysis.append(person_analysis)
+        
+        # Build the complete Toronto gait format
+        toronto_result = {
+            'metadata': {
+                'format': 'Toronto Gait Analysis v1.0',
+                'input_file': str(self.config.input_path).replace('/', '\\'),
+                'generated_at': datetime.now().isoformat(),
+                'backend': self.backend_name,
+                'processing_parameters': {
+                    'confidence_threshold': self.config.min_confidence,
+                    'net_resolution': getattr(self.config, 'net_resolution', None),
+                    'model_pose': getattr(self.config, 'model_pose', None)
+                },
+                'video_metadata': self.video_metadata
+            },
+            'summary': {
+                'total_people_analyzed': len(gait_analysis),
+                'total_frames_processed': sum(analysis['total_frames'] for analysis in gait_analysis),
+                'analysis_duration': sum(analysis['duration_seconds'] for analysis in gait_analysis)
+            },
+            'gait_analysis': gait_analysis
+        }
+        
+        # Save Toronto gait format JSON
+        with open(toronto_path, 'w') as f:
+            json.dump(toronto_result, f, indent=2)
+        
+        logger.success(f"Toronto gait format saved: {len(gait_analysis)} people analyzed")
+        logger.success(f"Toronto gait output: {toronto_path}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -2223,6 +2462,10 @@ def main() -> int:
         # Save results
         detector.save_results(poses)
         detector.save_csv_results(poses)
+        
+        # Save Toronto gait format if requested
+        if config.toronto_gait_format:
+            detector.save_toronto_gait_format(poses)
         
         # Print summary
         elapsed_time = time.time() - start_time
