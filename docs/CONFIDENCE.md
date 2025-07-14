@@ -237,6 +237,145 @@ if confidence < CONFIDENCE_THRESHOLD:
 
 ---
 
+## How Low-Confidence Joints Are Interpolated or Filtered
+
+AmbientPose provides a robust mechanism for handling joint points with low confidence. This ensures that the output is both reliable and as complete as possible, even when some detections are uncertain or missing.
+
+### Decision Process: Interpolate or Filter?
+
+For each joint in each frame, the following logic is applied:
+
+1. **If the joint's confidence is above the threshold** (`min_joint_confidence`, default 0.3):
+    - The joint is accepted as-is.
+2. **If the joint's confidence is below the threshold:**
+    - The system attempts to interpolate the joint's position using the same joint from previous and next frames (for the same person) **if both sides have high-confidence detections**.
+    - If both a previous and next high-confidence value exist, the joint is linearly interpolated.
+    - If either side is missing a high-confidence value, the joint is marked as low confidence and is not interpolated.
+    - If the joint's coordinates are (0, 0), it is skipped entirely (not included in the output).
+
+#### Step-by-Step Algorithm
+
+```text
+For each joint in each frame:
+    If confidence >= min_joint_confidence:
+        Accept joint as-is
+    Else:
+        Find previous frame with high-confidence for this joint (prev_kp)
+        Find next frame with high-confidence for this joint (next_kp)
+        If prev_kp and next_kp exist:
+            Interpolate:
+                x = (prev_kp.x + next_kp.x) / 2
+                y = (prev_kp.y + next_kp.y) / 2
+                confidence = min(prev_kp.conf, next_kp.conf)
+            Mark joint as interpolated
+        Else:
+            Mark joint as low confidence
+        If joint coordinates are (0, 0):
+            Skip (do not include in output)
+```
+
+### Example Scenarios
+
+#### Example 1: Interpolation Succeeds
+
+| Frame | x    | y    | confidence |
+|-------|------|------|------------|
+| 10    | 100  | 200  | 0.9        |  ← high confidence
+| 11    | 0    | 0    | 0.1        |  ← low confidence (to interpolate)
+| 12    | 120  | 220  | 0.8        |  ← high confidence
+
+- For frame 11, both previous (frame 10) and next (frame 12) have high confidence.
+- Interpolated:
+    - x = (100 + 120) / 2 = 110
+    - y = (200 + 220) / 2 = 210
+    - confidence = min(0.9, 0.8) = 0.8
+- Marked as `interpolated: true` in the output.
+
+#### Example 2: Interpolation Fails (Edge Case)
+
+| Frame | x    | y    | confidence |
+|-------|------|------|------------|
+| 0     | 0    | 0    | 0.1        |  ← low (no previous high-confidence frame)
+| 1     | 0    | 0    | 0.1        |  ← low
+| 2     | 120  | 220  | 0.8        |  ← high confidence
+
+- For frames 0 and 1, there is no previous high-confidence frame.
+- No interpolation is performed; joints are marked as `low_confidence: true`.
+- If coordinates are (0, 0), the joint is skipped entirely.
+
+#### Example 3: Both Sides Low, Surrounded by High
+
+| Frame | x    | y    | confidence |
+|-------|------|------|------------|
+| 10    | 100  | 200  | 0.9        |  ← high
+| 11    | 0    | 0    | 0.1        |  ← low
+| 12    | 0    | 0    | 0.1        |  ← low
+| 13    | 120  | 220  | 0.8        |  ← high
+
+- For frames 11 and 12, both previous (frame 10) and next (frame 13) have high confidence.
+- Both are interpolated between frames 10 and 13.
+
+#### Example 4: Low Confidence at End (No Next High)
+
+| Frame | x    | y    | confidence |
+|-------|------|------|------------|
+| 8     | 100  | 200  | 0.9        |  ← high
+| 9     | 0    | 0    | 0.1        |  ← low
+| 10    | 0    | 0    | 0.1        |  ← low (no next high-confidence frame)
+
+- For frame 10, there is no next high-confidence frame.
+- No interpolation is performed; joint is marked as `low_confidence: true` or skipped if (0, 0).
+
+### Output Markers
+- Interpolated joints: `"interpolated": true`
+- Low-confidence, not interpolated: `"low_confidence": true`
+- Skipped if coordinates are (0, 0)
+
+---
+
+### System Architecture Diagram
+
+```mermaid
+graph TD
+    A[Input Frames] --> B[Pose Detection (per frame)]
+    B --> C[Joint Confidence Filtering]
+    C --> D{Confidence >= Threshold?}
+    D -- Yes --> E[Accept Joint]
+    D -- No --> F[Check History for Interpolation]
+    F -- Both Sides High --> G[Interpolate Joint]
+    F -- One/Both Sides Missing --> H[Mark as Low Confidence or Skip]
+    E & G & H --> I[Output Formatting]
+    I --> J[Export JSON/CSV]
+```
+
+---
+
+### Interaction Diagram: Joint Filtering & Interpolation
+
+```mermaid
+sequenceDiagram
+    participant Frame as Current Frame
+    participant Prev as Previous Frames
+    participant Next as Next Frames
+    participant Output as Output
+    Frame->>Frame: For each joint
+    alt Confidence >= threshold
+        Frame->>Output: Accept as-is
+    else Confidence < threshold
+        Frame->>Prev: Search for prev high-confidence
+        Frame->>Next: Search for next high-confidence
+        alt Both found
+            Prev->>Frame: Provide prev_kp
+            Next->>Frame: Provide next_kp
+            Frame->>Output: Interpolate and mark as interpolated
+        else One or both missing
+            Frame->>Output: Mark as low_confidence (or skip if (0,0))
+        end
+    end
+```
+
+---
+
 ## Best Practices and Recommendations
 
 - **Set a reasonable confidence threshold** for your application (e.g., 0.3 for visualization, 0.5+ for analytics).
