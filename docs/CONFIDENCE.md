@@ -412,15 +412,17 @@ This algorithm ensures that the output pose data is both robust and informative,
 
 ```mermaid
 graph TD
-    A[Input Frames] --> B[Pose Detection (per frame)]
-    B --> C[Joint Confidence Filtering]
-    C --> D{Confidence >= Threshold?}
-    D -- Yes --> E[Accept Joint]
-    D -- No --> F[Check History for Interpolation]
-    F -- Both Sides High --> G[Interpolate Joint]
-    F -- One/Both Sides Missing --> H[Mark as Low Confidence or Skip]
-    E & G & H --> I[Output Formatting]
-    I --> J[Export JSON/CSV]
+    A["Input Frames"] --> B["Pose Detection (per frame)"]
+    B --> C["Joint Confidence Filtering"]
+    C --> D{"Confidence >= Threshold?"}
+    D -- "Yes" --> E["Accept Joint"]
+    D -- "No" --> F["Check History for Interpolation"]
+    F -- "Both Sides High" --> G["Interpolate Joint"]
+    F -- "One/Both Sides Missing" --> H["Mark as Low Confidence or Skip"]
+    E --> I["Output Formatting"]
+    G --> I
+    H --> I
+    I --> J["Export JSON/CSV"]
 ```
 
 ---
