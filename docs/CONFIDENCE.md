@@ -22,10 +22,10 @@ This document explains how **joint confidence** and **pose confidence** are comp
 
 ## Overview: What is Confidence?
 
-- **Joint confidence**: A value (usually between 0 and 1) representing the model's certainty that a detected keypoint (joint) is correct.
-- **Pose confidence**: A value (usually between 0 and 1) representing the overall confidence in the detected pose (person), often computed as the average or minimum of the joint confidences, or as a separate detection score.
+- **Joint confidence**: A value (typically between 0 and 1) representing the model's certainty that a detected keypoint (joint) is correct.
+- **Pose confidence**: A value (typically between 0 and 1) representing the overall confidence in the detected pose (person), often computed as the average or minimum of the joint confidences, or as a separate detection score.
 
-These values are used to filter out unreliable detections and to inform downstream analysis (e.g., gait analysis, tracking).
+These values are used to filter out unreliable detections and to inform downstream analysis for gait analysis and tracking.
 
 ---
 
@@ -33,7 +33,7 @@ These values are used to filter out unreliable detections and to inform downstre
 
 ### MediaPipe
 
-- **Joint confidence**: Uses the `visibility` attribute of each landmark (see [MediaPipe docs](https://google.github.io/mediapipe/solutions/pose.html)).
+- **Joint confidence**: Uses the `visibility` attribute of each landmark.
 - **Pose confidence**: Always set to `1.0` (since MediaPipe does not provide an overall pose score).
 
 **Relevant code:**
@@ -137,7 +137,7 @@ pose = {
 
 ---
 
-## Where Confidence is Used in the Code
+## How Confidence is Used
 
 - **Detection filtering**: Each detector skips detections with pose confidence below `self.config.min_confidence`.
 - **Joint filtering**: By default, all joints are included, but we filter out joints with low confidence (see next section).
@@ -164,7 +164,6 @@ for i, joint_name in enumerate(joint_names):
         x, y, confidence = keypoints[i]
     else:
         x, y, confidence = 0.0, 0.0, 0.0
-    # Skip keypoints at (0,0) as they are spurious/undetected
     if x == 0.0 and y == 0.0:
         continue
     joint = {
