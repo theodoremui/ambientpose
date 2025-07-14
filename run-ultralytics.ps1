@@ -8,7 +8,7 @@ python cli/detect.py `
     --output-dir "outputs/video-$backend" `
     --overlay-video "outputs/video-$backend/overlay.mp4" `
     --backend $backend `
-    --confidence-threshold 0.3 `
+    --min-confidence 0.5 `
     --net-resolution 672x384 `
     --model-pose $model_pose `
     --toronto-gait-format `
