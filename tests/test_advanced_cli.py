@@ -182,7 +182,11 @@ class TestAmbientPoseConfigAdvanced:
             
             # Should create parent directory
             config = AmbientPoseConfig(args)
-            assert config.overlay_video_path == '/invalid/path/output.mp4'
+            import os
+            try:
+                assert os.path.normpath(config.overlay_video_path) == os.path.normpath('/invalid/path/output.mp4')
+            finally:
+                config.close_log_sink()
 
 
 class TestBackendSpecificConfigurations:
@@ -390,6 +394,7 @@ class TestTorontoGaitFormat:
             input_path = Path(temp_dir) / 'input.mp4'
             input_path.touch()
             config = SimpleConfig(Path(temp_dir) / 'test_output.json', input_path)
+            config.run_output_dir = Path(temp_dir)
             
             detector = PoseDetector.__new__(PoseDetector)
             detector.config = config
@@ -399,11 +404,12 @@ class TestTorontoGaitFormat:
             
             detector.save_toronto_gait_format(mock_poses)
             
-            # Verify file was created
-            assert output_path.exists() or (Path(temp_dir) / 'test_output.json').with_name('test_output_toronto_gait.json').exists()
+            # Verify file was created in run_output_dir as toronto_gait.json
+            expected_path = config.run_output_dir / 'toronto_gait.json'
+            assert expected_path.exists(), f"Expected {expected_path} to exist"
             
             # Verify JSON structure
-            with open((Path(temp_dir) / 'test_output.json').with_name('test_output_toronto_gait.json'), 'r') as f:
+            with open(expected_path, 'r') as f:
                 data = json.load(f)
             
             assert 'metadata' in data
@@ -514,14 +520,16 @@ class TestComprehensiveFrameExtraction:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / 'test_output_comprehensive_frames.json'
             config.output_json = Path(temp_dir) / 'test_output.json'
+            config.run_output_dir = Path(temp_dir)
             
             detector.save_comprehensive_frame_analysis()
             
-            # Verify file was created
-            assert output_path.exists()
+            # Verify file was created in run_output_dir as comprehensive_frames.json
+            expected_path = config.run_output_dir / 'comprehensive_frames.json'
+            assert expected_path.exists(), f"Expected {expected_path} to exist"
             
             # Verify JSON structure
-            with open(output_path, 'r') as f:
+            with open(expected_path, 'r') as f:
                 data = json.load(f)
             
             assert 'metadata' in data
@@ -590,22 +598,24 @@ class TestIntegrationScenarios:
             verbose=True,
             debug=False
         )
-        
+
         with tempfile.TemporaryDirectory() as temp_dir:
             test_video = Path(temp_dir) / "test.mp4"
             test_video.touch()
             args.video = str(test_video)
-            
+
             # This test verifies that all parameters are correctly parsed
             # and validated without actually running the detector
             config = AmbientPoseConfig(args)
-            
-            assert config.net_resolution == '656x368'
-            assert config.model_pose == 'BODY_25'
-            assert config.overlay_video_path == 'overlay.mp4'
-            assert config.toronto_gait_format is True
-            assert config.extract_comprehensive_frames is True
-            assert config.verbose is True
+            import os
+            try:
+                assert config.net_resolution == '656x368'
+                assert config.model_pose == 'BODY_25'
+                assert os.path.normpath(config.overlay_video_path) == os.path.normpath('overlay.mp4')
+                assert config.toronto_gait_format is True
+                assert config.extract_comprehensive_frames is True
+            finally:
+                config.close_log_sink()
 
 
 class TestJointConfidenceFilteringAndInterpolation:
@@ -680,14 +690,17 @@ class TestJointConfidenceFilteringAndInterpolation:
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
             config = AmbientPoseConfig(args)
-            detector = UltralyticsDetector(config)
-            # One pose, one joint, interpolated
-            pose = {'bbox': [0,0,100,100,1.0], 'score': 1.0, 'keypoints': [[15, 15, 0.7]], 'backend': 'ultralytics'}
-            converted_pose = {'joints': [{'keypoint': {'x': 15, 'y': 15, 'confidence': 0.7, 'interpolated': True}}]}
-            img = np.zeros((100, 100, 3), dtype=np.uint8)
-            out = detector.draw_poses(img.copy(), [pose], [converted_pose])
-            # Check that magenta pixel is present (255,0,255)
-            assert ((out[:,:,0] == 255) & (out[:,:,1] == 0) & (out[:,:,2] == 255)).any()
+            try:
+                detector = UltralyticsDetector(config)
+                # One pose, one joint, interpolated
+                pose = {'bbox': [0,0,100,100,1.0], 'score': 1.0, 'keypoints': [[15, 15, 0.7]], 'backend': 'ultralytics'}
+                converted_pose = {'joints': [{'keypoint': {'x': 15, 'y': 15, 'confidence': 0.7, 'interpolated': True}}]}
+                img = np.zeros((100, 100, 3), dtype=np.uint8)
+                out = detector.draw_poses(img.copy(), [pose], [converted_pose])
+                # Check that magenta pixel is present (255,0,255)
+                assert ((out[:,:,0] == 255) & (out[:,:,1] == 0) & (out[:,:,2] == 255)).any()
+            finally:
+                config.close_log_sink()
 
     def test_stats_count_low_confidence_and_interpolated(self):
         """PoseDetector counts low-confidence/interpolated joints correctly."""
@@ -703,25 +716,29 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            pd.all_converted_poses = [
-                {'joints': [
-                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
-                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
-                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
-                ]}
-            ]
-            pd.low_conf_joints_count = 0
-            pd.total_joints_count = 0
-            for pose in pd.all_converted_poses:
-                for joint in pose['joints']:
-                    pd.total_joints_count += 1
-                    if joint['keypoint'].get('interpolated', False):
-                        pd.low_conf_joints_count += 1
-                    elif joint['keypoint']['confidence'] < pd.config.min_joint_confidence:
-                        pd.low_conf_joints_count += 1
-            assert pd.total_joints_count == 3
-            assert pd.low_conf_joints_count == 2
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                pd.all_converted_poses = [
+                    {'joints': [
+                        {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
+                        {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
+                        {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
+                    ]}
+                ]
+                pd.low_conf_joints_count = 0
+                pd.total_joints_count = 0
+                for pose in pd.all_converted_poses:
+                    for joint in pose['joints']:
+                        pd.total_joints_count += 1
+                        if joint['keypoint'].get('interpolated', False):
+                            pd.low_conf_joints_count += 1
+                        elif joint['keypoint']['confidence'] < pd.config.min_joint_confidence:
+                            pd.low_conf_joints_count += 1
+                assert pd.total_joints_count == 3
+                assert pd.low_conf_joints_count == 2
+            finally:
+                config.close_log_sink()
 
     def test_zero_joints_no_division_by_zero(self):
         """If there are zero joints, percentage is 0 and no ZeroDivisionError occurs."""
@@ -737,12 +754,16 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            pd.all_converted_poses = []
-            pd.low_conf_joints_count = 0
-            pd.total_joints_count = 0
-            # Should not raise
-            pd.save_results([])
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                pd.all_converted_poses = []
+                pd.low_conf_joints_count = 0
+                pd.total_joints_count = 0
+                # Should not raise
+                pd.save_results([])
+            finally:
+                config.close_log_sink()
 
     def test_summary_json_no_interpolated_joints(self):
         """If there are no interpolated joints, the summary JSON is correct and well-structured."""
@@ -762,47 +783,51 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            pd.all_converted_poses = []
-            pd.low_conf_joints_count = 0
-            pd.total_joints_count = 0
-            # Use a Loguru sink to capture all log output, including SUCCESS
-            sink = StringIO()
-            sink_id = logger.add(sink, level="SUCCESS")
-            pd.save_results([])
-            logger.remove(sink_id)
-            sink.seek(0)
-            log_output = sink.read()
-            # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
-            lines = log_output.splitlines()
-            for i, line in enumerate(lines):
-                if "Summary:" in line:
-                    # Find the first '{' in this or subsequent lines
-                    json_lines = []
-                    found_brace = False
-                    for l in lines[i:]:
-                        if not found_brace:
-                            if '{' in l:
-                                found_brace = True
-                                json_lines.append(l[l.index('{'):])
-                        else:
-                            json_lines.append(l)
-                        if '}' in l:
-                            # Assume last '}' closes the JSON
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                pd.all_converted_poses = []
+                pd.low_conf_joints_count = 0
+                pd.total_joints_count = 0
+                # Use a Loguru sink to capture all log output, including SUCCESS
+                sink = StringIO()
+                sink_id = logger.add(sink, level="SUCCESS")
+                pd.save_results([])
+                logger.remove(sink_id)
+                sink.seek(0)
+                log_output = sink.read()
+                # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
+                lines = log_output.splitlines()
+                for i, line in enumerate(lines):
+                    if "Summary:" in line:
+                        # Find the first '{' in this or subsequent lines
+                        json_lines = []
+                        found_brace = False
+                        for l in lines[i:]:
+                            if not found_brace:
+                                if '{' in l:
+                                    found_brace = True
+                                    json_lines.append(l[l.index('{'):])
+                            else:
+                                json_lines.append(l)
+                            if '}' in l:
+                                # Assume last '}' closes the JSON
+                                break
+                        if json_lines:
+                            json_str = '\n'.join(json_lines)
+                            summary_json = _json.loads(json_str)
                             break
-                    if json_lines:
-                        json_str = '\n'.join(json_lines)
-                        summary_json = _json.loads(json_str)
-                        break
-            else:
-                assert False, "Summary JSON not found in log"
-            # Check only the new summary keys
-            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
-            # Check that all values are zero/empty as expected
-            assert summary_json["original_total_joints"] == 0
-            assert summary_json["original_low_confidence_joints"] == 0
-            assert summary_json["original_low_confidence_joints_per_frame"] == {} or summary_json["original_low_confidence_joints_per_frame"] == {0: 0}
-            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+                else:
+                    assert False, "Summary JSON not found in log"
+                # Check only the new summary keys
+                assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+                # Check that all values are zero/empty as expected
+                assert summary_json["original_total_joints"] == 0
+                assert summary_json["original_low_confidence_joints"] == 0
+                assert summary_json["original_low_confidence_joints_per_frame"] == {} or summary_json["original_low_confidence_joints_per_frame"] == {0: 0}
+                assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+            finally:
+                config.close_log_sink()
 
     def test_summary_json_joint_counting(self):
         """Test that original joint counts are correct in the summary JSON."""
@@ -822,62 +847,66 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            # Simulate original joint stats
-            pd.original_total_joints_global = 5
-            pd.original_low_conf_joints_global = 2
-            pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
-            pd.original_total_joints_per_frame = {0: 3, 1: 2}
-            # Simulate output joints (all high-confidence after interpolation)
-            pd.all_converted_poses = [
-                {'person_id': 0, 'frame_number': 0, 'joints': [
-                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
-                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
-                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
-                ]},
-                {'person_id': 1, 'frame_number': 1, 'joints': [
-                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False}},
-                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True}},
-                ]}
-            ]
-            sink = StringIO()
-            sink_id = logger.add(sink, level="SUCCESS")
-            pd.save_results([])
-            logger.remove(sink_id)
-            sink.seek(0)
-            log_output = sink.read()
-            # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
-            lines = log_output.splitlines()
-            for i, line in enumerate(lines):
-                if "Summary:" in line:
-                    json_lines = []
-                    found_brace = False
-                    for l in lines[i:]:
-                        if not found_brace:
-                            if '{' in l:
-                                found_brace = True
-                                json_lines.append(l[l.index('{'):])
-                        else:
-                            json_lines.append(l)
-                        if '}' in l:
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                # Simulate original joint stats
+                pd.original_total_joints_global = 5
+                pd.original_low_conf_joints_global = 2
+                pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
+                pd.original_total_joints_per_frame = {0: 3, 1: 2}
+                # Simulate output joints (all high-confidence after interpolation)
+                pd.all_converted_poses = [
+                    {'person_id': 0, 'frame_number': 0, 'joints': [
+                        {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
+                        {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
+                        {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
+                    ]},
+                    {'person_id': 1, 'frame_number': 1, 'joints': [
+                        {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False}},
+                        {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True}},
+                    ]}
+                ]
+                sink = StringIO()
+                sink_id = logger.add(sink, level="SUCCESS")
+                pd.save_results([])
+                logger.remove(sink_id)
+                sink.seek(0)
+                log_output = sink.read()
+                # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
+                lines = log_output.splitlines()
+                for i, line in enumerate(lines):
+                    if "Summary:" in line:
+                        json_lines = []
+                        found_brace = False
+                        for l in lines[i:]:
+                            if not found_brace:
+                                if '{' in l:
+                                    found_brace = True
+                                    json_lines.append(l[l.index('{'):])
+                            else:
+                                json_lines.append(l)
+                            if '}' in l:
+                                break
+                        if json_lines:
+                            json_str = '\n'.join(json_lines)
+                            summary_json = _json.loads(json_str)
                             break
-                    if json_lines:
-                        json_str = '\n'.join(json_lines)
-                        summary_json = _json.loads(json_str)
-                        break
-            else:
-                assert False, "Summary JSON not found in log"
-            # Check only the new summary keys
-            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
-            # Check global
-            assert summary_json["original_total_joints"] == 5
-            assert summary_json["original_low_confidence_joints"] == 2
-            # Check per-frame
-            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
-            # The sum across frames equals the global count
-            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
-            # Note is present
-            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+                else:
+                    assert False, "Summary JSON not found in log"
+                # Check only the new summary keys
+                assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+                # Check global
+                assert summary_json["original_total_joints"] == 5
+                assert summary_json["original_low_confidence_joints"] == 2
+                # Check per-frame
+                assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
+                # The sum across frames equals the global count
+                assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+                # Note is present
+                assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+            finally:
+                config.close_log_sink()
 
     def test_original_low_confidence_joint_counting(self):
         """Test that original low-confidence joint counts are correct in summary (global, per-frame, per-person)."""
@@ -896,65 +925,69 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            # Simulate original joint stats
-            pd.original_total_joints_global = 6
-            pd.original_low_conf_joints_global = 2
-            pd.original_total_joints_per_frame = {0: 3, 1: 3}
-            pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
-            pd.original_total_joints_per_person = {0: 4, 1: 2}
-            pd.original_low_conf_joints_per_person = {0: 1, 1: 1}
-            # Simulate output joints (all high-confidence after interpolation)
-            pd.all_converted_poses = [
-                {'person_id': 0, 'frame_number': 0, 'joints': [
-                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
-                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
-                ]},
-                {'person_id': 0, 'frame_number': 1, 'joints': [
-                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': False, 'low_confidence': False}},
-                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
-                ]},
-                {'person_id': 1, 'frame_number': 1, 'joints': [
-                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
-                    {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.5, 'interpolated': False, 'low_confidence': False}},
-                ]}
-            ]
-            sink = StringIO()
-            sink_id = logger.add(sink, level="SUCCESS")
-            pd.save_results([])
-            logger.remove(sink_id)
-            sink.seek(0)
-            log_output = sink.read()
-            # Find the summary JSON in the log
-            lines = log_output.splitlines()
-            for i, line in enumerate(lines):
-                if "Summary:" in line:
-                    json_lines = []
-                    found_brace = False
-                    for l in lines[i:]:
-                        if not found_brace:
-                            if '{' in l:
-                                found_brace = True
-                                json_lines.append(l[l.index('{'):])
-                        else:
-                            json_lines.append(l)
-                        if '}' in l:
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                # Simulate original joint stats
+                pd.original_total_joints_global = 6
+                pd.original_low_conf_joints_global = 2
+                pd.original_total_joints_per_frame = {0: 3, 1: 3}
+                pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
+                pd.original_total_joints_per_person = {0: 4, 1: 2}
+                pd.original_low_conf_joints_per_person = {0: 1, 1: 1}
+                # Simulate output joints (all high-confidence after interpolation)
+                pd.all_converted_poses = [
+                    {'person_id': 0, 'frame_number': 0, 'joints': [
+                        {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                        {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
+                    ]},
+                    {'person_id': 0, 'frame_number': 1, 'joints': [
+                        {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': False, 'low_confidence': False}},
+                        {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
+                    ]},
+                    {'person_id': 1, 'frame_number': 1, 'joints': [
+                        {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                        {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.5, 'interpolated': False, 'low_confidence': False}},
+                    ]}
+                ]
+                sink = StringIO()
+                sink_id = logger.add(sink, level="SUCCESS")
+                pd.save_results([])
+                logger.remove(sink_id)
+                sink.seek(0)
+                log_output = sink.read()
+                # Find the summary JSON in the log
+                lines = log_output.splitlines()
+                for i, line in enumerate(lines):
+                    if "Summary:" in line:
+                        json_lines = []
+                        found_brace = False
+                        for l in lines[i:]:
+                            if not found_brace:
+                                if '{' in l:
+                                    found_brace = True
+                                    json_lines.append(l[l.index('{'):])
+                            else:
+                                json_lines.append(l)
+                            if '}' in l:
+                                break
+                        if json_lines:
+                            json_str = '\n'.join(json_lines)
+                            summary_json = _json.loads(json_str)
                             break
-                    if json_lines:
-                        json_str = '\n'.join(json_lines)
-                        summary_json = _json.loads(json_str)
-                        break
-            else:
-                assert False, "Summary JSON not found in log"
-            # Check global
-            assert summary_json["original_total_joints"] == 6
-            assert summary_json["original_low_confidence_joints"] == 2
-            # Check per-frame
-            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
-            # The sum across frames equals the global count
-            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
-            # Note is present
-            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+                else:
+                    assert False, "Summary JSON not found in log"
+                # Check global
+                assert summary_json["original_total_joints"] == 6
+                assert summary_json["original_low_confidence_joints"] == 2
+                # Check per-frame
+                assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
+                # The sum across frames equals the global count
+                assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+                # Note is present
+                assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+            finally:
+                config.close_log_sink()
 
     def test_original_low_confidence_joint_counting_from_detection(self):
         """Test that original low-confidence joint counts are correct when counted immediately after detection."""
@@ -973,89 +1006,131 @@ class TestJointConfidenceFilteringAndInterpolation:
                 overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
                 verbose=False, debug=False, min_joint_confidence=0.3
             )
-            pd = PoseDetector(AmbientPoseConfig(args))
-            # Simulate detection output (before tracking)
-            # Frame 0: person 0 (2 joints: 1 high, 1 low), person 1 (1 joint: low)
-            # Frame 1: person 0 (1 joint: high), person 1 (2 joints: both low)
-            pd.original_low_conf_joints_global = 0
-            pd.original_total_joints_global = 0
-            pd.original_low_conf_joints_per_frame = {}
-            pd.original_total_joints_per_frame = {}
-            pd.original_low_conf_joints_per_person = {}
-            pd.original_total_joints_per_person = {}
-            # Simulate what the new code would do
-            # Frame 0
-            pd.original_total_joints_per_frame[0] = 3
-            pd.original_low_conf_joints_per_frame[0] = 2
-            pd.original_total_joints_per_person[0] = 2
-            pd.original_low_conf_joints_per_person[0] = 1
-            pd.original_total_joints_per_person[1] = 1
-            pd.original_low_conf_joints_per_person[1] = 1
-            # Frame 1
-            pd.original_total_joints_per_frame[1] = 3
-            pd.original_low_conf_joints_per_frame[1] = 2
-            pd.original_total_joints_per_person[0] += 1
-            # person 0, frame 1: 1 high
-            # person 1, frame 1: 2 low
-            pd.original_total_joints_per_person[1] += 2
-            pd.original_low_conf_joints_per_person[1] += 2
-            pd.original_total_joints_global = 6
-            pd.original_low_conf_joints_global = 4
-            # Simulate output joints (all high-confidence after interpolation)
-            pd.all_converted_poses = [
-                {'person_id': 0, 'frame_number': 0, 'joints': [
-                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
-                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
-                ]},
-                {'person_id': 1, 'frame_number': 0, 'joints': [
-                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
-                ]},
-                {'person_id': 0, 'frame_number': 1, 'joints': [
-                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
-                ]},
-                {'person_id': 1, 'frame_number': 1, 'joints': [
-                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
-                    {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
-                ]}
-            ]
-            sink = StringIO()
-            sink_id = logger.add(sink, level="SUCCESS")
-            pd.save_results([])
-            logger.remove(sink_id)
-            sink.seek(0)
-            log_output = sink.read()
-            # Find the summary JSON in the log
-            lines = log_output.splitlines()
-            for i, line in enumerate(lines):
-                if "Summary:" in line:
-                    json_lines = []
-                    found_brace = False
-                    for l in lines[i:]:
-                        if not found_brace:
-                            if '{' in l:
-                                found_brace = True
-                                json_lines.append(l[l.index('{'):])
-                        else:
-                            json_lines.append(l)
-                        if '}' in l:
+            config = AmbientPoseConfig(args)
+            try:
+                pd = PoseDetector(config)
+                # Simulate detection output (before tracking)
+                # Frame 0: person 0 (2 joints: 1 high, 1 low), person 1 (1 joint: low)
+                # Frame 1: person 0 (1 joint: high), person 1 (2 joints: both low)
+                pd.original_low_conf_joints_global = 0
+                pd.original_total_joints_global = 0
+                pd.original_low_conf_joints_per_frame = {}
+                pd.original_total_joints_per_frame = {}
+                pd.original_low_conf_joints_per_person = {}
+                pd.original_total_joints_per_person = {}
+                # Simulate what the new code would do
+                # Frame 0
+                pd.original_total_joints_per_frame[0] = 3
+                pd.original_low_conf_joints_per_frame[0] = 2
+                pd.original_total_joints_per_person[0] = 2
+                pd.original_low_conf_joints_per_person[0] = 1
+                pd.original_total_joints_per_person[1] = 1
+                pd.original_low_conf_joints_per_person[1] = 1
+                # Frame 1
+                pd.original_total_joints_per_frame[1] = 3
+                pd.original_low_conf_joints_per_frame[1] = 2
+                pd.original_total_joints_per_person[0] += 1
+                # person 0, frame 1: 1 high
+                # person 1, frame 1: 2 low
+                pd.original_total_joints_per_person[1] += 2
+                pd.original_low_conf_joints_per_person[1] += 2
+                pd.original_total_joints_global = 6
+                pd.original_low_conf_joints_global = 4
+                # Simulate output joints (all high-confidence after interpolation)
+                pd.all_converted_poses = [
+                    {'person_id': 0, 'frame_number': 0, 'joints': [
+                        {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
+                        {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                    ]},
+                    {'person_id': 1, 'frame_number': 0, 'joints': [
+                        {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                    ]},
+                    {'person_id': 0, 'frame_number': 1, 'joints': [
+                        {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
+                    ]},
+                    {'person_id': 1, 'frame_number': 1, 'joints': [
+                        {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                        {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                    ]}
+                ]
+                sink = StringIO()
+                sink_id = logger.add(sink, level="SUCCESS")
+                pd.save_results([])
+                logger.remove(sink_id)
+                sink.seek(0)
+                log_output = sink.read()
+                # Find the summary JSON in the log
+                lines = log_output.splitlines()
+                for i, line in enumerate(lines):
+                    if "Summary:" in line:
+                        json_lines = []
+                        found_brace = False
+                        for l in lines[i:]:
+                            if not found_brace:
+                                if '{' in l:
+                                    found_brace = True
+                                    json_lines.append(l[l.index('{'):])
+                            else:
+                                json_lines.append(l)
+                            if '}' in l:
+                                break
+                        if json_lines:
+                            json_str = '\n'.join(json_lines)
+                            summary_json = _json.loads(json_str)
                             break
-                    if json_lines:
-                        json_str = '\n'.join(json_lines)
-                        summary_json = _json.loads(json_str)
-                        break
-            else:
-                assert False, "Summary JSON not found in log"
-            # Check only the new summary keys
-            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
-            # Check global
-            assert summary_json["original_total_joints"] == 6
-            assert summary_json["original_low_confidence_joints"] == 4
-            # Check per-frame
-            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 2, "1": 2} or summary_json["original_low_confidence_joints_per_frame"] == {0: 2, 1: 2}
-            # The sum across frames equals the global count
-            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
-            # Note is present
-            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+                else:
+                    assert False, "Summary JSON not found in log"
+                # Check only the new summary keys
+                assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+                # Check global
+                assert summary_json["original_total_joints"] == 6
+                assert summary_json["original_low_confidence_joints"] == 4
+                # Check per-frame
+                assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 2, "1": 2} or summary_json["original_low_confidence_joints_per_frame"] == {0: 2, 1: 2}
+                # The sum across frames equals the global count
+                assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+                # Note is present
+                assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+            finally:
+                config.close_log_sink()
+
+
+class TestOutputNamingScheme:
+    def test_logical_output_json_naming(self):
+        import re
+        import argparse
+        from cli.detect import AmbientPoseConfig
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_video = Path(temp_dir) / "myvideo.mp4"
+            test_video.touch()
+            args = argparse.Namespace(
+                video=str(test_video),
+                image_dir=None,
+                output=None,
+                output_dir=temp_dir,
+                backend="ultralytics",
+                min_confidence=0.5,
+                net_resolution=None,
+                model_pose=None,
+                overlay_video=None,
+                toronto_gait_format=False,
+                extract_comprehensive_frames=False,
+                verbose=False,
+                debug=False,
+                min_joint_confidence=0.3
+            )
+            config = AmbientPoseConfig(args)
+            try:
+                # Should be pose_points.json in the run directory
+                assert config.output_json.name == "pose_points.json", f"Output JSON name {config.output_json.name} does not match expected 'pose_points.json'"
+                # Parent should be a subdirectory of temp_dir matching the run dir pattern
+                import re
+                parent = config.output_json.parent
+                assert parent.parent == Path(temp_dir), f"Parent dir {parent.parent} is not temp_dir {temp_dir}"
+                pattern = re.compile(r"pose_myvideo_ultralytics_\d{8}_\d{6}")
+                assert pattern.match(parent.name), f"Run dir {parent.name} does not match expected pattern"
+            finally:
+                config.close_log_sink()
 
 
 if __name__ == '__main__':

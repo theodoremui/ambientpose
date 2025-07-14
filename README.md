@@ -192,3 +192,24 @@ Note: AlphaPose models are released for **non-commercial research**; commercial 
 
 > Made with passion by the AmbientPose engineering team.  
 > To contact the team, please send email to: Theodore Mui <theodoremui@gmail.com>
+
+## Running the Streamlit Frontend
+
+To launch the interactive pose detection frontend, use the following command from the project root:
+
+```sh
+streamlit run frontend/app.py
+```
+
+- On Windows, you can also use:
+  ```sh
+  streamlit run .\frontend\app.py
+  ```
+- Make sure your virtual environment is activated and all dependencies are installed (see below).
+
+**Troubleshooting:**
+- If you see an error like `stream : The term 'stream' is not recognized...`, you may have mistyped the command. The correct command is `streamlit run`, not `stream run`.
+- To verify Streamlit is installed, run:
+  ```sh
+  streamlit --version
+  ```
