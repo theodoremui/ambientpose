@@ -274,6 +274,82 @@ For each joint in each frame:
             Skip (do not include in output)
 ```
 
+### Formal Algorithm: Robust Filtering and Interpolation of Low-Confidence Joints
+
+**Input:**
+- For each frame \( f \) in a sequence \( F \), a set of detected poses \( P_f \).
+- For each pose \( p \in P_f \), a set of joints \( J_p = \{j_1, j_2, ..., j_n\} \), where each joint \( j_i \) is a tuple \((x, y, c)\) with coordinates \((x, y)\) and confidence \(c \in [0, 1]\).
+- A minimum joint confidence threshold \( \tau \) (e.g., 0.3).
+- For each person, a mapping of joint histories across frames.
+
+**Output:**
+- For each pose in each frame, a filtered and possibly interpolated set of joints, with metadata indicating whether each joint is interpolated, low-confidence, or accepted as-is.
+
+---
+
+#### Pseudocode
+
+```text
+For each frame f in F:
+    For each pose p in P_f:
+        For each joint index i in 1..n:
+            (x, y, c) ← p.joints[i]
+            If (x == 0 and y == 0):
+                // Spurious or undetected joint, skip
+                Continue to next joint
+
+            If c ≥ τ:
+                // High-confidence joint, accept as-is
+                Output joint:
+                    name: joint_name[i]
+                    joint_id: i
+                    keypoint: { x, y, confidence: c, interpolated: false, low_confidence: false }
+                Continue to next joint
+
+            // Low-confidence joint, attempt interpolation
+            prev_kp ← Find most recent previous frame f_prev < f where
+                        person_id matches p and
+                        joint i has confidence ≥ τ
+
+            next_kp ← Find earliest next frame f_next > f where
+                        person_id matches p and
+                        joint i has confidence ≥ τ
+
+            If prev_kp ≠ null and next_kp ≠ null:
+                // Both sides available, interpolate
+                x_interp ← (prev_kp.x + next_kp.x) / 2
+                y_interp ← (prev_kp.y + next_kp.y) / 2
+                c_interp ← min(prev_kp.confidence, next_kp.confidence)
+                Output joint:
+                    name: joint_name[i]
+                    joint_id: i
+                    keypoint: { x: x_interp, y: y_interp, confidence: c_interp, interpolated: true, low_confidence: false }
+            Else:
+                // Cannot interpolate, mark as low-confidence
+                Output joint:
+                    name: joint_name[i]
+                    joint_id: i
+                    keypoint: { x, y, confidence: c, interpolated: false, low_confidence: true }
+```
+
+---
+
+**Algorithm Explanation**
+
+1. **High-Confidence Acceptance:**
+   - If a joint's confidence \( c \) meets or exceeds the threshold \( \tau \), it is accepted without modification.
+2. **Filtering of Spurious Joints:**
+   - Joints with coordinates \((0, 0)\) are considered undetected and are omitted from the output.
+3. **Interpolation of Low-Confidence Joints:**
+   - For joints with \( c < \tau \), the algorithm searches for the same joint in both the most recent previous and earliest next frames (for the same person) where the joint's confidence is at least \( \tau \).
+   - If both are found, the joint's position is linearly interpolated, and its confidence is set to the minimum of the two. The joint is marked as `interpolated: true`.
+4. **Low-Confidence Marking:**
+   - If interpolation is not possible (i.e., one or both adjacent high-confidence joints are missing), the joint is retained but marked as `low_confidence: true`.
+5. **Output:**
+   - Each joint in the output is annotated with metadata indicating whether it was interpolated, low-confidence, or accepted as-is.
+
+This algorithm ensures that the output pose data is both robust and informative, maximizing the use of available high-confidence information while clearly flagging uncertain or interpolated data for downstream analysis.
+
 ### Example Scenarios
 
 #### Example 1: Interpolation Succeeds
