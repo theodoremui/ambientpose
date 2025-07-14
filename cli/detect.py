@@ -22,6 +22,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+import re
 
 import cv2
 import numpy as np
@@ -199,27 +200,42 @@ class AmbientPoseConfig:
         self.input_path: Path = Path(args.video) if args.video else Path(args.image_dir)
         self.is_video: bool = args.video is not None
         
-        # Create output directory if it doesn't exist
-        self.output_dir: Path = Path(args.output_dir) if args.output_dir else self.DEFAULT_OUTPUT_DIR
-        self.output_dir.mkdir(exist_ok=True, parents=True)
-        
-        # Generate timestamp for output files
+        # Generate timestamp for output directory
         self.timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Set output JSON path
-        if args.output:
-            self.output_json: Path = Path(args.output)
+        backend_name = args.backend if args.backend != 'auto' else 'auto'
+        # Determine if output_dir already matches the run dir pattern
+        output_dir = Path(args.output_dir) if args.output_dir else self.DEFAULT_OUTPUT_DIR
+        run_dir_pattern = re.compile(r"^pose_[^_]+_[^_]+_\d{8}_\d{6}$")
+        if run_dir_pattern.match(output_dir.name):
+            # User already provided a run directory, use as is
+            self.run_output_dir = output_dir
         else:
-            filename = f"pose_{self.timestamp}.json"
-            self.output_json = self.output_dir / filename
+            # Create a new timestamped run directory inside output_dir
+            run_dir_name = f"pose_{self.input_path.stem}_{backend_name}_{self.timestamp}"
+            self.run_output_dir = output_dir / run_dir_name
+        self.run_output_dir.mkdir(exist_ok=True, parents=True)
         
-        # Create frame and overlay directories
-        input_name = self.input_path.stem
-        self.frames_dir: Path = self.output_dir / f"frames_{input_name}_{self.timestamp}"
-        self.overlay_dir: Path = self.output_dir / f"overlay_{input_name}_{self.timestamp}"
+        # Set up loguru file logging to run.log in the run output directory
+        self.log_file_path = self.run_output_dir / "run.log"
+        self.log_sink_id = logger.add(str(self.log_file_path),
+                   format="<green>{time:MM-DD HH:mm:ss}</green>|<level>{level: <5}</level>|<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+                   level="DEBUG",
+                   enqueue=True)
         
+        # Set output JSON path with simple name inside run directory
+        self.output_json: Path = self.run_output_dir / "pose_points.json"
+        
+        # Set up frames and overlay directories inside run dir
+        self.frames_dir: Path = self.run_output_dir / "frames"
+        self.overlay_dir: Path = self.run_output_dir / "overlays"
         self.frames_dir.mkdir(exist_ok=True)
         self.overlay_dir.mkdir(exist_ok=True)
+        
+        # Overlay video path: use user-supplied path if provided, else default to run dir
+        if getattr(args, 'overlay_video', None):
+            self.overlay_video_path: str = str(Path(args.overlay_video))
+        else:
+            self.overlay_video_path: str = str(self.run_output_dir / "pose_overlay.mp4")
         
         # Basic configuration
         self.backend: str = args.backend
@@ -231,7 +247,6 @@ class AmbientPoseConfig:
         # Advanced configuration options
         self.net_resolution: Optional[str] = args.net_resolution
         self.model_pose: Optional[str] = args.model_pose
-        self.overlay_video_path: Optional[str] = args.overlay_video
         self.toronto_gait_format: bool = args.toronto_gait_format
         self.extract_comprehensive_frames: bool = args.extract_comprehensive_frames
         self.verbose: bool = args.verbose
@@ -267,7 +282,7 @@ class AmbientPoseConfig:
         """Log detailed configuration information in verbose mode."""
         logger.info("=== AmbientPose Configuration Details ===")
         logger.info(f"Input: {self.input_path} ({'video' if self.is_video else 'images'})")
-        logger.info(f"Output directory: {self.output_dir}")
+        logger.info(f"Output directory: {self.run_output_dir}")
         logger.info(f"Output JSON: {self.output_json}")
         logger.info(f"Backend: {self.backend}")
         logger.info(f"Confidence threshold: {self.min_confidence}")
@@ -331,8 +346,8 @@ class AmbientPoseConfig:
             raise FileNotFoundError(f"Input path does not exist: {self.input_path}")
         
         # Check if output directory is writable
-        if not os.access(self.output_dir, os.W_OK):
-            raise PermissionError(f"Output directory is not writable: {self.output_dir}")
+        if not os.access(self.run_output_dir, os.W_OK):
+            raise PermissionError(f"Output directory is not writable: {self.run_output_dir}")
         
         # Validate network resolution format
         if self.net_resolution and not self._validate_net_resolution(self.net_resolution):
@@ -362,6 +377,13 @@ class AmbientPoseConfig:
                 logger.info("Toronto gait format enabled")
             if self.extract_comprehensive_frames:
                 logger.info("Comprehensive frame extraction enabled")
+
+    def close_log_sink(self):
+        if hasattr(self, 'log_sink_id'):
+            try:
+                logger.remove(self.log_sink_id)
+            except Exception:
+                pass
 
 
 class MediaPipeDetector:
@@ -2365,12 +2387,17 @@ class PoseDetector:
             logger.success(f"Low-confidence/interpolated joints: {interpolated_joints} / {total_joints} ({low_conf_pct:.2f}%)")
         else:
             logger.success(f"Low-confidence/interpolated joints: 0 / 0 (0.00%)")
+        # Also save summary as pretty-printed run.json
+        run_json_path = self.config.run_output_dir / "run.json"
+        with open(run_json_path, 'w') as f:
+            json.dump(summary_json, f, indent=2)
+        logger.success(f"Run summary saved: {run_json_path}")
     
     def save_csv_results(self, poses: List[Dict[str, Any]]) -> None:
         """Save pose detection results to CSV file with detailed joint information."""
-        # Generate CSV filename
-        csv_filename = self.config.output_json.stem + ".csv"
-        csv_path = self.config.output_json.parent / csv_filename
+        # Generate CSV filename in run output dir
+        csv_filename = "poses.csv"
+        csv_path = self.config.run_output_dir / csv_filename
         
         logger.info(f"Saving CSV results to {csv_path}")
         
@@ -2448,9 +2475,9 @@ class PoseDetector:
     
     def save_toronto_gait_format(self, poses: List[Dict[str, Any]]) -> None:
         """Save pose detection results in Toronto gait analysis format."""
-        # Generate Toronto gait filename
-        toronto_filename = self.config.output_json.stem + "_toronto_gait.json"
-        toronto_path = self.config.output_json.parent / toronto_filename
+        # Generate Toronto gait filename in run output dir
+        toronto_filename = "toronto_gait.json"
+        toronto_path = self.config.run_output_dir / toronto_filename
         
         logger.info(f"Saving Toronto gait format to {toronto_path}")
         
@@ -2774,9 +2801,9 @@ class PoseDetector:
         if not self.comprehensive_frame_data:
             return
         
-        # Generate comprehensive analysis filename
-        analysis_filename = self.config.output_json.stem + "_comprehensive_frames.json"
-        analysis_path = self.config.output_json.parent / analysis_filename
+        # Generate comprehensive analysis filename in run output dir
+        analysis_filename = "comprehensive_frames.json"
+        analysis_path = self.config.run_output_dir / analysis_filename
         
         logger.info(f"Saving comprehensive frame analysis to {analysis_path}")
         
@@ -2902,11 +2929,29 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     """Main entry point."""
     start_time = time.time()
-    
     try:
         # Parse arguments
         args = parse_args()
-        
+
+        # Preflight check: If using mediapipe, ensure model file exists
+        if args.backend in ("auto", "mediapipe"):
+            try:
+                import mediapipe
+                import os
+                model_path = os.path.join(
+                    os.path.dirname(mediapipe.__file__),
+                    'modules', 'pose_landmark', 'pose_landmark_lite.tflite'
+                )
+                if not os.path.exists(model_path):
+                    print(f"\n[ERROR] Mediapipe model file missing: {model_path}")
+                    print("You may be offline or behind a firewall.\n" 
+                          "Please manually download the model from:\n"
+                          "  https://storage.googleapis.com/mediapipe-assets/pose_landmark_lite.tflite\n"
+                          f"and place it in the directory above.\n")
+                    return 2
+            except ImportError:
+                pass  # Will fail later if mediapipe is not available
+
         # Check if any backends are available
         if not (MEDIAPIPE_AVAILABLE or ULTRALYTICS_AVAILABLE or OPENPOSE_AVAILABLE or ALPHAPOSE_AVAILABLE):
             logger.error("No pose detection backends available!")
@@ -2958,13 +3003,18 @@ def main() -> int:
             analysis_path = config.output_json.parent / (config.output_json.stem + "_comprehensive_frames.json")
             logger.success(f"Comprehensive frame analysis saved to: {analysis_path}")
         
+        config.close_log_sink()
         return 0
         
     except KeyboardInterrupt:
         logger.warning("Process interrupted by user")
+        if 'config' in locals():
+            config.close_log_sink()
         return 130
     except Exception as e:
         logger.exception(f"Error: {e}")
+        if 'config' in locals():
+            config.close_log_sink()
         return 1
 
 

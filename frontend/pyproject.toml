@@ -1,0 +1,14 @@
+[project]
+name = "ambientpose-frontend"
+version = "0.1.0"
+description = "Streamlit frontend for AmbientPose pose detection explorer"
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit>=1.35.0",
+    "plotly>=5.20.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "opencv-python-headless>=4.9.0.80",
+    "python-multipart>=0.0.9",
+    "loguru>=0.7.3",
+] 

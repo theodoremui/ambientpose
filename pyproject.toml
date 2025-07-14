@@ -27,12 +27,14 @@ dependencies = [
   "pydantic==2.6.1",
   "starlette==0.36.3",
   "websockets==12.0",
-  "python-multipart==0.0.9", # For handling file uploads in FastAPI
+  "python-multipart==0.0.9", # For handling file uploads in FastAPI and Streamlit
   # CLI / Computer Vision
   "torch==2.2.0 ; platform_system != 'Darwin'",
   "torchvision==0.17.0 ; platform_system != 'Darwin'",
   "torchaudio==2.2.0 ; platform_system != 'Darwin'",
   "opencv-python==4.10.0.84",
+  # For Streamlit frontend (headless, avoids GUI issues)
+  "opencv-python-headless>=4.9.0.80",
   "numpy==1.26.0",
   "pillow==10.3.0",
   "pycocotools==2.0.10",
@@ -46,6 +48,10 @@ dependencies = [
   "tensorboardx>=2.6", # TensorBoard logging support
   "scipy>=1.10.0", # Scientific computing for pose processing
   "matplotlib>=3.7.0", # Plotting and visualization
+  # Streamlit Frontend -----------------------------------------------
+  "streamlit>=1.35.0",
+  "plotly>=5.20.0",
+  "pandas>=2.2.0",
   # AlphaPose (Optional) -----------------------------------------------
   # NOTE: AlphaPose depends on NumPy during its *build* step which causes
   # front-loading issues with most build back-ends (and `uv sync`).  To
@@ -67,7 +73,7 @@ dependencies = [
   # to MediaPipe or Ultralytics if not. For most use cases, MediaPipe
   # provides excellent pose detection without the complexity of AlphaPose.
   # Utilities
-  "loguru==0.7.2",
+  "loguru>=0.7.3",  # Upgraded for frontend compatibility
   "python-dotenv==1.0.1",
   "tqdm==4.66.1",
   "pyyaml==6.0.1",
