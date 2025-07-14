@@ -223,8 +223,8 @@ if confidence < CONFIDENCE_THRESHOLD:
 ```
 
 **Where to implement:**
-- We should need to extend the data structures in `PoseDetector` to keep a history of keypoints per person.
-- Add helper functions to retrieve previous/next keypoints for interpolation.
+- We extended the data structures in `PoseDetector` to keep a history of keypoints per person.
+- We also added helper functions to retrieve previous/next keypoints for interpolation.
 
 #### Example Scenario
 - Frame 10: Left ankle confidence = 0.2 (below threshold)
