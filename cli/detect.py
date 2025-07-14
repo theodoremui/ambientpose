@@ -225,6 +225,8 @@ class AmbientPoseConfig:
         self.backend: str = args.backend
         self.debug: bool = args.debug
         self.min_confidence: float = args.min_confidence
+        # Minimum joint confidence for filtering/interpolation
+        self.min_joint_confidence: float = getattr(args, 'min_joint_confidence', 0.3)
         
         # Advanced configuration options
         self.net_resolution: Optional[str] = args.net_resolution
@@ -438,8 +440,7 @@ class MediaPipeDetector:
             # Convert landmarks to keypoints
             keypoints = []
             for lm in landmarks:
-                x, y = lm.x * width, lm.y * height
-                confidence = lm.visibility if hasattr(lm, 'visibility') else 1.0
+                x, y, confidence = lm.x * width, lm.y * height, lm.visibility if hasattr(lm, 'visibility') else 1.0
                 keypoints.append([x, y, confidence])
             
             pose = {
@@ -453,37 +454,90 @@ class MediaPipeDetector:
         
         return poses
     
-    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
-        """Draw poses on the image."""
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]], converted_poses: List[Dict[str, Any]] = None) -> np.ndarray:
+        """Draw poses on the image. Interpolated joints are magenta, high-confidence are original color."""
         if not poses:
             return image
         
         # Convert to RGB for MediaPipe drawing
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
-        for pose in poses:
+        magenta = (255, 0, 255)  # For interpolated joints
+        drawing_threshold = 0.3
+        edge_margin = 10
+        height, width = image.shape[:2]
+        
+        for idx, pose in enumerate(poses):
             # Draw bounding box
             bbox = pose['bbox']
             x1, y1, x2, y2 = map(int, bbox[:4])
             cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # Convert keypoints back to MediaPipe format for drawing
-            if len(pose['keypoints']) == 33:  # MediaPipe has 33 landmarks
-                # Create a mock landmark list
-                height, width = image.shape[:2]
-                landmark_list = []
-                
-                for x, y, conf in pose['keypoints']:
-                    # Create a simple object with x, y attributes
-                    class MockLandmark:
-                        def __init__(self, x, y):
-                            self.x = x / width
-                            self.y = y / height
+            # Draw confidence score
+            score = bbox[4] if len(bbox) > 4 else pose['score']
+            cv2.putText(image, f'{score:.4f}', (x1, y1-10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            
+            keypoints = pose['keypoints']
+            
+            # Use converted_poses to get interpolation info
+            interp_flags = None
+            if converted_poses is not None and idx < len(converted_poses):
+                interp_flags = [j['keypoint'].get('interpolated', False) for j in converted_poses[idx]['joints']]
+            
+            # Function to validate keypoint
+            def is_valid_keypoint(x, y, conf):
+                """Check if keypoint is valid for drawing."""
+                return (conf > drawing_threshold and 
+                        x > edge_margin and y > edge_margin and 
+                        x < width - edge_margin and y < height - edge_margin)
+            
+            # Draw keypoints (only valid ones)
+            drawn_keypoints = 0
+            valid_keypoints = []
+            
+            for i, (x, y, conf) in enumerate(keypoints):
+                if is_valid_keypoint(x, y, conf):
+                    x, y = int(x), int(y)
+                    # Use magenta for interpolated, else original color
+                    color = magenta if interp_flags and i < len(interp_flags) and interp_flags[i] else (0, 255, 0)
+                    cv2.circle(image, (x, y), 4, color, -1)
                     
-                    landmark_list.append(MockLandmark(x, y))
+                    # Optional: Draw keypoint index for debugging
+                    # cv2.putText(image, f'{i}', (x+5, y-5), 
+                    #            cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+                    
+                    valid_keypoints.append(i)
+                    drawn_keypoints += 1
+            
+            # Debug: Add drawn keypoint count
+            cv2.putText(image, f'KP:{drawn_keypoints}', (x1, y1-30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+            
+            # Draw skeleton (only between valid keypoints)
+            for connection in [
+                (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
+                (9, 10), (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
+                (17, 19), (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
+                (11, 23), (12, 24), (23, 24), (23, 25), (24, 26), (25, 27), (26, 28),
+                (27, 29), (28, 30), (29, 31), (30, 32), (27, 31), (28, 32)
+            ]:
+                pt1_idx, pt2_idx = connection
                 
-                # Draw pose connections
-                self._draw_landmarks(image, landmark_list)
+                # Check if both keypoints exist and are valid
+                if (pt1_idx < len(keypoints) and pt2_idx < len(keypoints) and
+                    pt1_idx in valid_keypoints and pt2_idx in valid_keypoints):
+                    
+                    x1_kp, y1_kp, conf1 = keypoints[pt1_idx]
+                    x2_kp, y2_kp, conf2 = keypoints[pt2_idx]
+                    
+                    # Double-check both keypoints are valid
+                    if (is_valid_keypoint(x1_kp, y1_kp, conf1) and 
+                        is_valid_keypoint(x2_kp, y2_kp, conf2)):
+                        
+                        x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
+                        color = magenta if interp_flags and pt1_idx < len(interp_flags) and interp_flags[pt1_idx] else (0, 255, 0)
+                        cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
         
         return image
     
@@ -611,8 +665,8 @@ class UltralyticsDetector:
         
         return poses
     
-    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
-        """Draw poses on the image."""
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]], converted_poses: List[Dict[str, Any]] = None) -> np.ndarray:
+        """Draw poses on the image. Interpolated joints are magenta, high-confidence are original color."""
         if not poses:
             return image
         
@@ -624,7 +678,6 @@ class UltralyticsDetector:
             (11, 13), (13, 15), (12, 14), (14, 16)  # Legs
         ]
         
-        # Colors for different keypoints
         colors = [
             (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
             (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
@@ -632,12 +685,12 @@ class UltralyticsDetector:
             (255, 0, 255), (255, 0, 170)
         ]
         
-        # Improved drawing thresholds
-        drawing_threshold = 0.3  # Higher threshold for drawing
-        edge_margin = 10  # Minimum distance from image edges
+        magenta = (255, 0, 255)  # For interpolated joints
+        drawing_threshold = 0.3
+        edge_margin = 10
         height, width = image.shape[:2]
         
-        for pose in poses:
+        for idx, pose in enumerate(poses):
             # Draw bounding box
             bbox = pose['bbox']
             x1, y1, x2, y2 = map(int, bbox[:4])
@@ -649,6 +702,11 @@ class UltralyticsDetector:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             
             keypoints = pose['keypoints']
+            
+            # Use converted_poses to get interpolation info
+            interp_flags = None
+            if converted_poses is not None and idx < len(converted_poses):
+                interp_flags = [j['keypoint'].get('interpolated', False) for j in converted_poses[idx]['joints']]
             
             # Function to validate keypoint
             def is_valid_keypoint(x, y, conf):
@@ -664,7 +722,8 @@ class UltralyticsDetector:
             for i, (x, y, conf) in enumerate(keypoints):
                 if is_valid_keypoint(x, y, conf):
                     x, y = int(x), int(y)
-                    color = colors[i % len(colors)]
+                    # Use magenta for interpolated, else original color
+                    color = magenta if interp_flags and i < len(interp_flags) and interp_flags[i] else colors[i % len(colors)]
                     cv2.circle(image, (x, y), 4, color, -1)
                     
                     # Optional: Draw keypoint index for debugging
@@ -694,7 +753,7 @@ class UltralyticsDetector:
                         is_valid_keypoint(x2_kp, y2_kp, conf2)):
                         
                         x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
-                        color = colors[pt1_idx % len(colors)]
+                        color = magenta if interp_flags and pt1_idx < len(interp_flags) and interp_flags[pt1_idx] else colors[pt1_idx % len(colors)]
                         cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
         
         return image
@@ -1164,8 +1223,8 @@ class AlphaPoseDetector:
         # Return intersection over smaller area (more conservative)
         return intersection / min(area1, area2) if min(area1, area2) > 0 else 0.0
     
-    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
-        """Draw poses on the image."""
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]], converted_poses: List[Dict[str, Any]] = None) -> np.ndarray:
+        """Draw poses on the image. Interpolated joints are magenta, high-confidence are original color."""
         if not poses:
             return image
         
@@ -1177,7 +1236,6 @@ class AlphaPoseDetector:
             (11, 13), (13, 15), (12, 14), (14, 16)  # Legs
         ]
         
-        # Colors for different keypoints
         colors = [
             (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
             (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
@@ -1185,12 +1243,12 @@ class AlphaPoseDetector:
             (255, 0, 255), (255, 0, 170)
         ]
         
-        # Appropriate drawing thresholds for AlphaPose using official coordinate processing
-        drawing_threshold = 0.1  # Lower threshold for AlphaPose as official processing gives better confidence scores
-        edge_margin = 10  # Minimum distance from image edges
+        magenta = (255, 0, 255)  # For interpolated joints
+        drawing_threshold = 0.3
+        edge_margin = 10
         height, width = image.shape[:2]
         
-        for pose in poses:
+        for idx, pose in enumerate(poses):
             # Draw bounding box
             bbox = pose['bbox']
             x1, y1, x2, y2 = map(int, bbox[:4])
@@ -1202,6 +1260,11 @@ class AlphaPoseDetector:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             
             keypoints = pose['keypoints']
+            
+            # Use converted_poses to get interpolation info
+            interp_flags = None
+            if converted_poses is not None and idx < len(converted_poses):
+                interp_flags = [j['keypoint'].get('interpolated', False) for j in converted_poses[idx]['joints']]
             
             # Function to validate keypoint
             def is_valid_keypoint(x, y, conf):
@@ -1217,7 +1280,8 @@ class AlphaPoseDetector:
             for i, (x, y, conf) in enumerate(keypoints):
                 if is_valid_keypoint(x, y, conf):
                     x, y = int(x), int(y)
-                    color = colors[i % len(colors)]
+                    # Use magenta for interpolated, else original color
+                    color = magenta if interp_flags and i < len(interp_flags) and interp_flags[i] else colors[i % len(colors)]
                     cv2.circle(image, (x, y), 4, color, -1)
                     
                     # Optional: Draw keypoint index for debugging
@@ -1247,7 +1311,7 @@ class AlphaPoseDetector:
                         is_valid_keypoint(x2_kp, y2_kp, conf2)):
                         
                         x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
-                        color = colors[pt1_idx % len(colors)]
+                        color = magenta if interp_flags and pt1_idx < len(interp_flags) and interp_flags[pt1_idx] else colors[pt1_idx % len(colors)]
                         cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
         
         return image
@@ -1540,8 +1604,8 @@ class OpenPoseDetector:
         
         return poses
     
-    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]]) -> np.ndarray:
-        """Draw poses on the image."""
+    def draw_poses(self, image: np.ndarray, poses: List[Dict[str, Any]], converted_poses: List[Dict[str, Any]] = None) -> np.ndarray:
+        """Draw poses on the image. Interpolated joints are magenta, high-confidence are original color."""
         if not poses:
             return image
         
@@ -1553,7 +1617,6 @@ class OpenPoseDetector:
             (2, 16), (5, 17)  # Arms to ears
         ]
         
-        # Colors for different keypoints
         colors = [
             (255, 0, 0), (255, 85, 0), (255, 170, 0), (255, 255, 0), (170, 255, 0),
             (85, 255, 0), (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
@@ -1562,12 +1625,12 @@ class OpenPoseDetector:
             (170, 255, 85), (85, 255, 170), (85, 170, 255), (170, 85, 255), (255, 85, 170)
         ]
         
-        # Drawing thresholds
+        magenta = (255, 0, 255)  # For interpolated joints
         drawing_threshold = 0.1
         edge_margin = 10
         height, width = image.shape[:2]
         
-        for pose in poses:
+        for idx, pose in enumerate(poses):
             # Draw bounding box
             bbox = pose['bbox']
             x1, y1, x2, y2 = map(int, bbox[:4])
@@ -1579,6 +1642,11 @@ class OpenPoseDetector:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             
             keypoints = pose['keypoints']
+            
+            # Use converted_poses to get interpolation info
+            interp_flags = None
+            if converted_poses is not None and idx < len(converted_poses):
+                interp_flags = [j['keypoint'].get('interpolated', False) for j in converted_poses[idx]['joints']]
             
             # Function to validate keypoint
             def is_valid_keypoint(x, y, conf):
@@ -1594,7 +1662,8 @@ class OpenPoseDetector:
             for i, (x, y, conf) in enumerate(keypoints):
                 if is_valid_keypoint(x, y, conf):
                     x, y = int(x), int(y)
-                    color = colors[i % len(colors)]
+                    # Use magenta for interpolated, else original color
+                    color = magenta if interp_flags and i < len(interp_flags) and interp_flags[i] else colors[i % len(colors)]
                     cv2.circle(image, (x, y), 4, color, -1)
                     
                     valid_keypoints.append(i)
@@ -1620,7 +1689,7 @@ class OpenPoseDetector:
                         is_valid_keypoint(x2_kp, y2_kp, conf2)):
                         
                         x1_kp, y1_kp, x2_kp, y2_kp = int(x1_kp), int(y1_kp), int(x2_kp), int(y2_kp)
-                        color = colors[pt1_idx % len(colors)]
+                        color = magenta if interp_flags and pt1_idx < len(interp_flags) and interp_flags[pt1_idx] else colors[pt1_idx % len(colors)]
                         cv2.line(image, (x1_kp, y1_kp), (x2_kp, y2_kp), color, 2)
         
         return image
@@ -1750,44 +1819,75 @@ def get_coco_joint_names() -> List[str]:
     ]
 
 
-def convert_pose_to_joints_format(pose: Dict[str, Any], frame_number: int, timestamp: float) -> Dict[str, Any]:
-    """Convert pose data to the target joints format."""
+def convert_pose_to_joints_format(pose: Dict[str, Any], frame_number: int, timestamp: float, joint_history: dict, config: AmbientPoseConfig) -> Dict[str, Any]:
+    """Convert pose data to the target joints format, with filtering and interpolation for low-confidence joints."""
     joint_names = get_coco_joint_names()
-    
     joints = []
     keypoints = pose['keypoints']
-    
+    person_id = pose.get('person_id', 0)
+    min_joint_conf = getattr(config, 'min_joint_confidence', 0.3)
     # Ensure we have enough keypoints, pad with zeros if needed
     while len(keypoints) < len(joint_names):
         keypoints.append([0.0, 0.0, 0.0])
-    
     for i, joint_name in enumerate(joint_names):
         if i < len(keypoints):
             x, y, confidence = keypoints[i]
         else:
             x, y, confidence = 0.0, 0.0, 0.0
-        
+        interpolated = False
+        low_confidence = False
+        orig_confidence = confidence
+        # Filter or interpolate
+        if confidence < min_joint_conf:
+            # Try to interpolate using previous and next frames
+            prev_kp = None
+            next_kp = None
+            # Find previous frame with high confidence
+            if person_id in joint_history and i in joint_history[person_id]:
+                prev_frames = [f for f in joint_history[person_id][i] if f < frame_number]
+                prev_frames.sort(reverse=True)
+                for pf in prev_frames:
+                    px, py, pconf = joint_history[person_id][i][pf]
+                    if pconf >= min_joint_conf:
+                        prev_kp = (px, py, pconf)
+                        break
+                # Find next frame with high confidence
+                next_frames = [f for f in joint_history[person_id][i] if f > frame_number]
+                next_frames.sort()
+                for nf in next_frames:
+                    nx, ny, nconf = joint_history[person_id][i][nf]
+                    if nconf >= min_joint_conf:
+                        next_kp = (nx, ny, nconf)
+                        break
+            if prev_kp and next_kp:
+                # Linear interpolation
+                x = (prev_kp[0] + next_kp[0]) / 2
+                y = (prev_kp[1] + next_kp[1]) / 2
+                confidence = min(prev_kp[2], next_kp[2])
+                interpolated = True
+            else:
+                # Mark as low confidence if cannot interpolate
+                low_confidence = True
         # Skip keypoints at (0,0) as they are spurious/undetected
         if x == 0.0 and y == 0.0:
             continue
-            
         joint = {
             "name": joint_name,
             "joint_id": i,
             "keypoint": {
                 "x": round(float(x), 4),
-                "y": round(float(y), 4), 
-                "confidence": round(float(confidence), 4)
+                "y": round(float(y), 4),
+                "confidence": round(float(confidence), 4),
+                "interpolated": interpolated,
+                "low_confidence": low_confidence
             }
         }
         joints.append(joint)
-    
     # Calculate overall pose confidence (average of valid keypoint confidences)
     valid_confidences = [kp[2] for kp in keypoints if kp[2] > 0 and not (kp[0] == 0.0 and kp[1] == 0.0)]
     overall_confidence = sum(valid_confidences) / len(valid_confidences) if valid_confidences else 0.0
-    
     return {
-        "person_id": pose.get('person_id', 0),
+        "person_id": person_id,
         "frame_number": frame_number,
         "timestamp": timestamp,
         "confidence": round(float(overall_confidence), 4),
@@ -1816,6 +1916,17 @@ class PoseDetector:
         self.video_metadata = {}
         self.all_converted_poses = []  # Store poses in the new format
         self.comprehensive_frame_data = []  # Store comprehensive frame analysis
+        # Joint history: {person_id: {joint_id: {frame_number: (x, y, confidence)}}}
+        self.joint_history = {}
+        self.low_conf_joints_count = 0
+        self.total_joints_count = 0
+        # New: Track original low-confidence joints per-frame, per-person, and globally
+        self.original_low_conf_joints_global = 0
+        self.original_total_joints_global = 0
+        self.original_low_conf_joints_per_frame = {}  # frame_number -> count
+        self.original_total_joints_per_frame = {}     # frame_number -> count
+        self.original_low_conf_joints_per_person = {} # person_id -> count
+        self.original_total_joints_per_person = {}    # person_id -> count
         
         # Select backend
         if config.backend == "auto":
@@ -1969,22 +2080,56 @@ class PoseDetector:
                 # Detect poses
                 poses = self.detector.detect_poses(frame, frame_idx)
                 
+                # Count original low-confidence joints per-frame, per-person, and globally (before tracking)
+                frame_low_conf = 0
+                frame_total = 0
+                for pose in poses:
+                    person_id = pose.get('person_id', 0)
+                    keypoints = pose['keypoints']
+                    if person_id not in self.original_low_conf_joints_per_person:
+                        self.original_low_conf_joints_per_person[person_id] = 0
+                        self.original_total_joints_per_person[person_id] = 0
+                    for kp in keypoints:
+                        frame_total += 1
+                        self.original_total_joints_global += 1
+                        self.original_total_joints_per_person[person_id] += 1
+                        if kp[2] < self.config.min_joint_confidence:
+                            frame_low_conf += 1
+                            self.original_low_conf_joints_global += 1
+                            self.original_low_conf_joints_per_person[person_id] += 1
+                self.original_low_conf_joints_per_frame[frame_idx] = frame_low_conf
+                self.original_total_joints_per_frame[frame_idx] = frame_total
+                
                 # Apply person tracking
                 tracked_poses = self.person_tracker.update(poses, frame_idx)
                 all_poses.extend(tracked_poses)
                 
+                # Update joint history
+                for pose in tracked_poses:
+                    person_id = pose.get('person_id', 0)
+                    if person_id not in self.joint_history:
+                        self.joint_history[person_id] = {}
+                    for joint_id, kp in enumerate(pose['keypoints']):
+                        if joint_id not in self.joint_history[person_id]:
+                            self.joint_history[person_id][joint_id] = {}
+                        self.joint_history[person_id][joint_id][frame_idx] = tuple(kp)
+                
                 # Convert to new format and store
                 timestamp = frame_idx / fps if fps > 0 else 0.0
+                frame_converted_poses = []
                 for pose in tracked_poses:
-                    converted_pose = convert_pose_to_joints_format(pose, frame_idx, timestamp)
+                    converted_pose = convert_pose_to_joints_format(
+                        pose, frame_idx, timestamp, self.joint_history, self.config
+                    )
                     self.all_converted_poses.append(converted_pose)
+                    frame_converted_poses.append(converted_pose)
                 
                 # Comprehensive frame extraction if requested
                 if self.config.extract_comprehensive_frames:
                     self._extract_comprehensive_frame_data(frame, frame_idx, timestamp, tracked_poses)
                 
-                # Draw and save overlay frame
-                overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses)
+                # Draw and save overlay frame (pass converted_poses)
+                overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses, frame_converted_poses)
                 cv2.imwrite(str(self.config.overlay_dir / frame_filename), overlay_frame)
                 
                 # Add frame to overlay video if requested
@@ -2058,18 +2203,52 @@ class PoseDetector:
             # Detect poses
             poses = self.detector.detect_poses(frame, idx)
             
+            # Count original low-confidence joints per-frame, per-person, and globally (before tracking)
+            frame_low_conf = 0
+            frame_total = 0
+            for pose in poses:
+                person_id = pose.get('person_id', 0)
+                keypoints = pose['keypoints']
+                if person_id not in self.original_low_conf_joints_per_person:
+                    self.original_low_conf_joints_per_person[person_id] = 0
+                    self.original_total_joints_per_person[person_id] = 0
+                for kp in keypoints:
+                    frame_total += 1
+                    self.original_total_joints_global += 1
+                    self.original_total_joints_per_person[person_id] += 1
+                    if kp[2] < self.config.min_joint_confidence:
+                        frame_low_conf += 1
+                        self.original_low_conf_joints_global += 1
+                        self.original_low_conf_joints_per_person[person_id] += 1
+            self.original_low_conf_joints_per_frame[idx] = frame_low_conf
+            self.original_total_joints_per_frame[idx] = frame_total
+            
             # Apply person tracking
             tracked_poses = self.person_tracker.update(poses, idx)
             all_poses.extend(tracked_poses)
             
+            # Update joint history
+            for pose in tracked_poses:
+                person_id = pose.get('person_id', 0)
+                if person_id not in self.joint_history:
+                    self.joint_history[person_id] = {}
+                for joint_id, kp in enumerate(pose['keypoints']):
+                    if joint_id not in self.joint_history[person_id]:
+                        self.joint_history[person_id][joint_id] = {}
+                    self.joint_history[person_id][joint_id][idx] = tuple(kp)
+            
             # Convert to new format and store
             timestamp = float(idx)  # Use frame index as timestamp for images
+            frame_converted_poses = []
             for pose in tracked_poses:
-                converted_pose = convert_pose_to_joints_format(pose, idx, timestamp)
+                converted_pose = convert_pose_to_joints_format(
+                    pose, idx, timestamp, self.joint_history, self.config
+                )
                 self.all_converted_poses.append(converted_pose)
+                frame_converted_poses.append(converted_pose)
             
-            # Draw and save overlay frame
-            overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses)
+            # Draw and save overlay frame (pass converted_poses)
+            overlay_frame = self.detector.draw_poses(frame.copy(), tracked_poses, frame_converted_poses)
             cv2.imwrite(str(self.config.overlay_dir / frame_filename), overlay_frame)
         
         logger.info(f"Image processing complete: {len(image_files)} images processed, {len(all_poses)} poses detected")
@@ -2093,6 +2272,41 @@ class PoseDetector:
         frames_with_poses = len(set(pose['frame_number'] for pose in self.all_converted_poses))
         total_frames = self.video_metadata.get('frame_count', frames_with_poses)
         avg_poses_per_frame = round(total_poses / total_frames, 4) if total_frames > 0 else 0
+        # Compute total joints, low-confidence joints, and interpolated joints from all_converted_poses
+        total_joints = 0
+        interpolated_joints = 0
+        low_confidence_joints = 0
+        for pose in self.all_converted_poses:
+            for joint in pose['joints']:
+                total_joints += 1
+                if joint['keypoint'].get('interpolated', False):
+                    interpolated_joints += 1
+                if joint['keypoint'].get('low_confidence', False):
+                    low_confidence_joints += 1
+        if total_joints > 0:
+            low_conf_pct = 100.0 * low_confidence_joints / total_joints
+            interp_pct = 100.0 * interpolated_joints / total_joints
+        else:
+            low_conf_pct = 0.0
+            interp_pct = 0.0
+        # Compute original low-confidence joint stats
+        orig_total = self.original_total_joints_global
+        orig_low_conf = self.original_low_conf_joints_global
+        orig_low_conf_pct = 100.0 * orig_low_conf / orig_total if orig_total > 0 else 0.0
+        # Per-frame and per-person breakdowns
+        orig_low_conf_per_frame = self.original_low_conf_joints_per_frame
+        orig_total_per_frame = self.original_total_joints_per_frame
+        orig_low_conf_per_person = self.original_low_conf_joints_per_person
+        orig_total_per_person = self.original_total_joints_per_person
+        # Build a structured JSON summary for logging and reporting
+        summary_json = {
+            "original_total_joints": orig_total,
+            "original_low_confidence_joints": orig_low_conf,
+            "original_low_confidence_joints_per_frame": orig_low_conf_per_frame,
+            "note": (
+                "original_low_confidence_joints_per_frame gives the number of joints originally detected with low confidence in each frame. The sum across all frames equals original_low_confidence_joints. After filtering/interpolation, all low-confidence joints are either interpolated or removed from the final output."
+            )
+        }
         
         # Determine model info based on backend
         if self.backend_name == "alphapose":
@@ -2119,8 +2333,13 @@ class PoseDetector:
                     "video_metadata": self.video_metadata,
                     "model_pose": model_pose,
                     "net_resolution": net_resolution,
-                    "confidence_threshold": self.config.min_confidence
-                }
+                    "confidence_threshold": self.config.min_confidence,
+                    "min_joint_confidence": self.config.min_joint_confidence,
+                    "low_confidence_joints": low_confidence_joints,
+                    "total_joints": total_joints,
+                    "low_confidence_joint_percentage": round(low_conf_pct, 2)
+                },
+                "summary": summary_json
             },
             "summary": {
                 "total_poses": total_poses,
@@ -2138,6 +2357,14 @@ class PoseDetector:
         
         logger.success(f"Results saved: {total_poses} poses detected using {self.backend_name} backend")
         logger.success(f"Tracked {unique_people} unique people across {total_frames} frames")
+        # Log the structured summary as JSON for downstream reporting
+        import json as _json
+        logger.success(f"Summary: {_json.dumps(summary_json, separators=(',', ':'))}")
+        # Avoid division by zero in log
+        if total_joints > 0:
+            logger.success(f"Low-confidence/interpolated joints: {interpolated_joints} / {total_joints} ({low_conf_pct:.2f}%)")
+        else:
+            logger.success(f"Low-confidence/interpolated joints: 0 / 0 (0.00%)")
     
     def save_csv_results(self, poses: List[Dict[str, Any]]) -> None:
         """Save pose detection results to CSV file with detailed joint information."""
@@ -2618,6 +2845,7 @@ def parse_args() -> argparse.Namespace:
       --extract-comprehensive-frames   Extract comprehensive frame metadata and analysis
       --debug                          Enable debug mode
       --verbose                        Enable verbose logging with detailed information
+      --min-joint-confidence <float>   Minimum confidence for individual joint points (default: 0.3). Joints below this will be filtered/interpolated.
 
     See docs/ADVANCED_CLI.md for full details and backend-specific notes.
     """
@@ -2665,7 +2893,9 @@ def parse_args() -> argparse.Namespace:
     # Logging options
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging with detailed information')
-    
+    # Add minimum joint confidence argument
+    parser.add_argument('--min-joint-confidence', type=float, default=0.3,
+                        help='Minimum confidence for individual joint points (default: 0.3). Joints below this will be filtered/interpolated.')
     return parser.parse_args()
 
 

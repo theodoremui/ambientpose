@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 import numpy as np
 import cv2
+import types
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
@@ -29,7 +30,8 @@ from cli.detect import (
     UltralyticsDetector,
     OpenPoseDetector,
     AlphaPoseDetector,
-    parse_args
+    parse_args,
+    convert_pose_to_joints_format
 )
 
 
@@ -290,6 +292,13 @@ class TestOverlayVideoGeneration:
             detector.video_metadata = {}
             detector.all_converted_poses = []
             detector.comprehensive_frame_data = []
+            # Initialize new attributes for original joint stats
+            detector.original_low_conf_joints_per_frame = {}
+            detector.original_total_joints_per_frame = {}
+            detector.original_low_conf_joints_per_person = {}
+            detector.original_total_joints_per_person = {}
+            detector.original_low_conf_joints_global = 0
+            detector.original_total_joints_global = 0
             
             # Mock OpenCV VideoWriter
             with patch('cv2.VideoWriter') as mock_writer:
@@ -597,6 +606,456 @@ class TestIntegrationScenarios:
             assert config.toronto_gait_format is True
             assert config.extract_comprehensive_frames is True
             assert config.verbose is True
+
+
+class TestJointConfidenceFilteringAndInterpolation:
+    """Test joint filtering and interpolation logic for min_joint_confidence."""
+    def make_config(self, min_joint_confidence=0.3):
+        cfg = types.SimpleNamespace()
+        cfg.min_joint_confidence = min_joint_confidence
+        return cfg
+
+    def test_filter_low_confidence_joints(self):
+        """Joints below threshold are included as low-confidence if no interpolation possible."""
+        joint_history = {0: {0: {0: (10, 10, 0.2)}}}  # Only one frame, low confidence
+        pose = {'person_id': 0, 'keypoints': [[10, 10, 0.2]]}
+        result = convert_pose_to_joints_format(pose, 0, 0.0, joint_history, self.make_config(0.3))
+        # Should include the joint, marked as low_confidence
+        assert len(result['joints']) == 1
+        joint = result['joints'][0]
+        assert joint['keypoint']['low_confidence'] is True
+        assert joint['keypoint']['interpolated'] is False
+        assert joint['keypoint']['confidence'] == 0.2
+
+    def test_interpolate_joint_between_frames(self):
+        """Joints below threshold are interpolated if adjacent frames have high confidence."""
+        joint_history = {
+            0: {
+                0: {
+                    0: (10, 10, 0.8),  # prev
+                    1: (0, 0, 0.1),    # current (low)
+                    2: (20, 20, 0.7)   # next
+                }
+            }
+        }
+        pose = {'person_id': 0, 'keypoints': [[0, 0, 0.1]]}
+        result = convert_pose_to_joints_format(pose, 1, 1.0, joint_history, self.make_config(0.3))
+        # Should interpolate between (10,10) and (20,20)
+        assert len(result['joints']) == 1
+        joint = result['joints'][0]
+        assert joint['keypoint']['interpolated'] is True
+        assert abs(joint['keypoint']['x'] - 15) < 1e-3
+        assert abs(joint['keypoint']['y'] - 15) < 1e-3
+        assert abs(joint['keypoint']['confidence'] - 0.7) < 1e-3
+
+    def test_no_interpolation_if_no_high_conf_neighbors(self):
+        """Joints below threshold are not interpolated if no high-confidence neighbors exist."""
+        joint_history = {
+            0: {
+                0: {
+                    0: (10, 10, 0.2),  # prev low
+                    1: (0, 0, 0.1),    # current low
+                    2: (20, 20, 0.2)   # next low
+                }
+            }
+        }
+        pose = {'person_id': 0, 'keypoints': [[0, 0, 0.1]]}
+        result = convert_pose_to_joints_format(pose, 1, 1.0, joint_history, self.make_config(0.3))
+        # Should be empty since no interpolation possible
+        assert result['joints'] == []
+
+    def test_overlay_marks_interpolated_joints(self):
+        """Overlay drawing uses magenta for interpolated joints."""
+        # Use UltralyticsDetector for test
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            config = AmbientPoseConfig(args)
+            detector = UltralyticsDetector(config)
+            # One pose, one joint, interpolated
+            pose = {'bbox': [0,0,100,100,1.0], 'score': 1.0, 'keypoints': [[15, 15, 0.7]], 'backend': 'ultralytics'}
+            converted_pose = {'joints': [{'keypoint': {'x': 15, 'y': 15, 'confidence': 0.7, 'interpolated': True}}]}
+            img = np.zeros((100, 100, 3), dtype=np.uint8)
+            out = detector.draw_poses(img.copy(), [pose], [converted_pose])
+            # Check that magenta pixel is present (255,0,255)
+            assert ((out[:,:,0] == 255) & (out[:,:,1] == 0) & (out[:,:,2] == 255)).any()
+
+    def test_stats_count_low_confidence_and_interpolated(self):
+        """PoseDetector counts low-confidence/interpolated joints correctly."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            pd.all_converted_poses = [
+                {'joints': [
+                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
+                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
+                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
+                ]}
+            ]
+            pd.low_conf_joints_count = 0
+            pd.total_joints_count = 0
+            for pose in pd.all_converted_poses:
+                for joint in pose['joints']:
+                    pd.total_joints_count += 1
+                    if joint['keypoint'].get('interpolated', False):
+                        pd.low_conf_joints_count += 1
+                    elif joint['keypoint']['confidence'] < pd.config.min_joint_confidence:
+                        pd.low_conf_joints_count += 1
+            assert pd.total_joints_count == 3
+            assert pd.low_conf_joints_count == 2
+
+    def test_zero_joints_no_division_by_zero(self):
+        """If there are zero joints, percentage is 0 and no ZeroDivisionError occurs."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            pd.all_converted_poses = []
+            pd.low_conf_joints_count = 0
+            pd.total_joints_count = 0
+            # Should not raise
+            pd.save_results([])
+
+    def test_summary_json_no_interpolated_joints(self):
+        """If there are no interpolated joints, the summary JSON is correct and well-structured."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        import json as _json
+        from loguru import logger
+        from io import StringIO
+        import re
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            pd.all_converted_poses = []
+            pd.low_conf_joints_count = 0
+            pd.total_joints_count = 0
+            # Use a Loguru sink to capture all log output, including SUCCESS
+            sink = StringIO()
+            sink_id = logger.add(sink, level="SUCCESS")
+            pd.save_results([])
+            logger.remove(sink_id)
+            sink.seek(0)
+            log_output = sink.read()
+            # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
+            lines = log_output.splitlines()
+            for i, line in enumerate(lines):
+                if "Summary:" in line:
+                    # Find the first '{' in this or subsequent lines
+                    json_lines = []
+                    found_brace = False
+                    for l in lines[i:]:
+                        if not found_brace:
+                            if '{' in l:
+                                found_brace = True
+                                json_lines.append(l[l.index('{'):])
+                        else:
+                            json_lines.append(l)
+                        if '}' in l:
+                            # Assume last '}' closes the JSON
+                            break
+                    if json_lines:
+                        json_str = '\n'.join(json_lines)
+                        summary_json = _json.loads(json_str)
+                        break
+            else:
+                assert False, "Summary JSON not found in log"
+            # Check only the new summary keys
+            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+            # Check that all values are zero/empty as expected
+            assert summary_json["original_total_joints"] == 0
+            assert summary_json["original_low_confidence_joints"] == 0
+            assert summary_json["original_low_confidence_joints_per_frame"] == {} or summary_json["original_low_confidence_joints_per_frame"] == {0: 0}
+            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+
+    def test_summary_json_joint_counting(self):
+        """Test that original joint counts are correct in the summary JSON."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        import json as _json
+        from loguru import logger
+        from io import StringIO
+        import re
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            # Simulate original joint stats
+            pd.original_total_joints_global = 5
+            pd.original_low_conf_joints_global = 2
+            pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
+            pd.original_total_joints_per_frame = {0: 3, 1: 2}
+            # Simulate output joints (all high-confidence after interpolation)
+            pd.all_converted_poses = [
+                {'person_id': 0, 'frame_number': 0, 'joints': [
+                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': False}},
+                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False}},
+                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': True}},
+                ]},
+                {'person_id': 1, 'frame_number': 1, 'joints': [
+                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False}},
+                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True}},
+                ]}
+            ]
+            sink = StringIO()
+            sink_id = logger.add(sink, level="SUCCESS")
+            pd.save_results([])
+            logger.remove(sink_id)
+            sink.seek(0)
+            log_output = sink.read()
+            # Find the summary JSON in the log (handle multi-line pretty-printed JSON)
+            lines = log_output.splitlines()
+            for i, line in enumerate(lines):
+                if "Summary:" in line:
+                    json_lines = []
+                    found_brace = False
+                    for l in lines[i:]:
+                        if not found_brace:
+                            if '{' in l:
+                                found_brace = True
+                                json_lines.append(l[l.index('{'):])
+                        else:
+                            json_lines.append(l)
+                        if '}' in l:
+                            break
+                    if json_lines:
+                        json_str = '\n'.join(json_lines)
+                        summary_json = _json.loads(json_str)
+                        break
+            else:
+                assert False, "Summary JSON not found in log"
+            # Check only the new summary keys
+            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+            # Check global
+            assert summary_json["original_total_joints"] == 5
+            assert summary_json["original_low_confidence_joints"] == 2
+            # Check per-frame
+            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
+            # The sum across frames equals the global count
+            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+            # Note is present
+            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+
+    def test_original_low_confidence_joint_counting(self):
+        """Test that original low-confidence joint counts are correct in summary (global, per-frame, per-person)."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig
+        import argparse
+        import json as _json
+        from loguru import logger
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            # Simulate original joint stats
+            pd.original_total_joints_global = 6
+            pd.original_low_conf_joints_global = 2
+            pd.original_total_joints_per_frame = {0: 3, 1: 3}
+            pd.original_low_conf_joints_per_frame = {0: 1, 1: 1}
+            pd.original_total_joints_per_person = {0: 4, 1: 2}
+            pd.original_low_conf_joints_per_person = {0: 1, 1: 1}
+            # Simulate output joints (all high-confidence after interpolation)
+            pd.all_converted_poses = [
+                {'person_id': 0, 'frame_number': 0, 'joints': [
+                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
+                ]},
+                {'person_id': 0, 'frame_number': 1, 'joints': [
+                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.7, 'interpolated': False, 'low_confidence': False}},
+                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
+                ]},
+                {'person_id': 1, 'frame_number': 1, 'joints': [
+                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                    {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.5, 'interpolated': False, 'low_confidence': False}},
+                ]}
+            ]
+            sink = StringIO()
+            sink_id = logger.add(sink, level="SUCCESS")
+            pd.save_results([])
+            logger.remove(sink_id)
+            sink.seek(0)
+            log_output = sink.read()
+            # Find the summary JSON in the log
+            lines = log_output.splitlines()
+            for i, line in enumerate(lines):
+                if "Summary:" in line:
+                    json_lines = []
+                    found_brace = False
+                    for l in lines[i:]:
+                        if not found_brace:
+                            if '{' in l:
+                                found_brace = True
+                                json_lines.append(l[l.index('{'):])
+                        else:
+                            json_lines.append(l)
+                        if '}' in l:
+                            break
+                    if json_lines:
+                        json_str = '\n'.join(json_lines)
+                        summary_json = _json.loads(json_str)
+                        break
+            else:
+                assert False, "Summary JSON not found in log"
+            # Check global
+            assert summary_json["original_total_joints"] == 6
+            assert summary_json["original_low_confidence_joints"] == 2
+            # Check per-frame
+            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 1, "1": 1} or summary_json["original_low_confidence_joints_per_frame"] == {0: 1, 1: 1}
+            # The sum across frames equals the global count
+            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+            # Note is present
+            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
+
+    def test_original_low_confidence_joint_counting_from_detection(self):
+        """Test that original low-confidence joint counts are correct when counted immediately after detection."""
+        import tempfile
+        from cli.detect import AmbientPoseConfig, PoseDetector
+        import argparse
+        import json as _json
+        from loguru import logger
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as temp_dir:
+            dummy_video = Path(temp_dir) / "dummy.mp4"
+            dummy_video.touch()
+            args = argparse.Namespace(
+                video=str(dummy_video), image_dir=None, output=None, output_dir=temp_dir,
+                backend='ultralytics', min_confidence=0.5, net_resolution=None, model_pose=None,
+                overlay_video=None, toronto_gait_format=False, extract_comprehensive_frames=False,
+                verbose=False, debug=False, min_joint_confidence=0.3
+            )
+            pd = PoseDetector(AmbientPoseConfig(args))
+            # Simulate detection output (before tracking)
+            # Frame 0: person 0 (2 joints: 1 high, 1 low), person 1 (1 joint: low)
+            # Frame 1: person 0 (1 joint: high), person 1 (2 joints: both low)
+            pd.original_low_conf_joints_global = 0
+            pd.original_total_joints_global = 0
+            pd.original_low_conf_joints_per_frame = {}
+            pd.original_total_joints_per_frame = {}
+            pd.original_low_conf_joints_per_person = {}
+            pd.original_total_joints_per_person = {}
+            # Simulate what the new code would do
+            # Frame 0
+            pd.original_total_joints_per_frame[0] = 3
+            pd.original_low_conf_joints_per_frame[0] = 2
+            pd.original_total_joints_per_person[0] = 2
+            pd.original_low_conf_joints_per_person[0] = 1
+            pd.original_total_joints_per_person[1] = 1
+            pd.original_low_conf_joints_per_person[1] = 1
+            # Frame 1
+            pd.original_total_joints_per_frame[1] = 3
+            pd.original_low_conf_joints_per_frame[1] = 2
+            pd.original_total_joints_per_person[0] += 1
+            # person 0, frame 1: 1 high
+            # person 1, frame 1: 2 low
+            pd.original_total_joints_per_person[1] += 2
+            pd.original_low_conf_joints_per_person[1] += 2
+            pd.original_total_joints_global = 6
+            pd.original_low_conf_joints_global = 4
+            # Simulate output joints (all high-confidence after interpolation)
+            pd.all_converted_poses = [
+                {'person_id': 0, 'frame_number': 0, 'joints': [
+                    {'keypoint': {'x': 1, 'y': 1, 'confidence': 0.8, 'interpolated': False, 'low_confidence': False}},
+                    {'keypoint': {'x': 2, 'y': 2, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                ]},
+                {'person_id': 1, 'frame_number': 0, 'joints': [
+                    {'keypoint': {'x': 3, 'y': 3, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                ]},
+                {'person_id': 0, 'frame_number': 1, 'joints': [
+                    {'keypoint': {'x': 4, 'y': 4, 'confidence': 0.9, 'interpolated': False, 'low_confidence': False}},
+                ]},
+                {'person_id': 1, 'frame_number': 1, 'joints': [
+                    {'keypoint': {'x': 5, 'y': 5, 'confidence': 0.2, 'interpolated': True, 'low_confidence': False}},
+                    {'keypoint': {'x': 6, 'y': 6, 'confidence': 0.1, 'interpolated': True, 'low_confidence': False}},
+                ]}
+            ]
+            sink = StringIO()
+            sink_id = logger.add(sink, level="SUCCESS")
+            pd.save_results([])
+            logger.remove(sink_id)
+            sink.seek(0)
+            log_output = sink.read()
+            # Find the summary JSON in the log
+            lines = log_output.splitlines()
+            for i, line in enumerate(lines):
+                if "Summary:" in line:
+                    json_lines = []
+                    found_brace = False
+                    for l in lines[i:]:
+                        if not found_brace:
+                            if '{' in l:
+                                found_brace = True
+                                json_lines.append(l[l.index('{'):])
+                        else:
+                            json_lines.append(l)
+                        if '}' in l:
+                            break
+                    if json_lines:
+                        json_str = '\n'.join(json_lines)
+                        summary_json = _json.loads(json_str)
+                        break
+            else:
+                assert False, "Summary JSON not found in log"
+            # Check only the new summary keys
+            assert set(summary_json.keys()) == {"original_total_joints", "original_low_confidence_joints", "original_low_confidence_joints_per_frame", "note"}
+            # Check global
+            assert summary_json["original_total_joints"] == 6
+            assert summary_json["original_low_confidence_joints"] == 4
+            # Check per-frame
+            assert summary_json["original_low_confidence_joints_per_frame"] == {"0": 2, "1": 2} or summary_json["original_low_confidence_joints_per_frame"] == {0: 2, 1: 2}
+            # The sum across frames equals the global count
+            assert sum(summary_json["original_low_confidence_joints_per_frame"].values()) == summary_json["original_low_confidence_joints"]
+            # Note is present
+            assert "original_low_confidence_joints_per_frame" in summary_json["note"]
 
 
 if __name__ == '__main__':
