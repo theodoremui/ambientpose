@@ -6,7 +6,7 @@ python cli/detect.py `
     --output-dir "outputs/video-$backend" `
     --overlay-video "outputs/video-$backend/overlay.mp4" `
     --backend $backend `
-    --confidence-threshold 0.2 `
+    --confidence-threshold 0.3 `
     --net-resolution 656x368 `
     --model-pose $model_pose `
     --toronto-gait-format `
