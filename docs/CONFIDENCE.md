@@ -4,22 +4,6 @@ This document explains how **joint confidence** and **pose confidence** are comp
 
 ---
 
-## Table of Contents
-
-1. [Overview: What is Confidence?](#overview-what-is-confidence)
-2. [How Each Detector Computes Confidence](#how-each-detector-computes-confidence)
-    - [MediaPipe](#mediapipe)
-    - [Ultralytics YOLO](#ultralytics-yolo)
-    - [AlphaPose](#alphapose)
-    - [OpenPose](#openpose)
-3. [Where Confidence is Used in the Code](#where-confidence-is-used-in-the-code)
-4. [Filtering Low-Confidence Joints](#filtering-low-confidence-joints)
-    - [Where to Add Filtering Logic](#where-to-add-filtering-logic)
-    - [Example: Filtering and Interpolation](#example-filtering-and-interpolation)
-5. [Best Practices and Recommendations](#best-practices-and-recommendations)
-
----
-
 ## Overview: What is Confidence?
 
 - **Joint confidence**: A value (typically between 0 and 1) representing the model's certainty that a detected keypoint (joint) is correct.
@@ -34,7 +18,7 @@ These values are used to filter out unreliable detections and to inform downstre
 ### MediaPipe
 
 - **Joint confidence**: Uses the `visibility` attribute of each landmark.
-- **Pose confidence**: Always set to `1.0` (since MediaPipe does not provide an overall pose score).
+- **Pose confidence**: Always set to 1.0 (since MediaPipe does not provide an overall pose score).
 
 **Relevant code:**
 - [`MediaPipeDetector.detect_poses`](../cli/detect.py#L410)
@@ -53,7 +37,7 @@ pose = {
 ```
 
 **Example:**
-- If a left wrist is detected at (x=100, y=200) with visibility 0.85, the keypoint is `[100, 200, 0.85]`.
+- If a left wrist is detected at (x=100, y=200) with visibility 0.85, the keypoint is [100, 200, 0.85].
 
 ### Ultralytics YOLO
 
@@ -77,7 +61,7 @@ pose = {
 ```
 
 **Example:**
-- A right ankle detected at (x=320, y=480) with confidence 0.42: `[320, 480, 0.42]`.
+- A right ankle detected at (x=320, y=480) with confidence 0.42: [320, 480, 0.42].
 - The pose's bounding box has confidence 0.91.
 
 ### AlphaPose
@@ -104,7 +88,7 @@ pose = {
 ```
 
 **Example:**
-- A left knee at (x=150, y=300) with confidence 0.67: `[150, 300, 0.67]`.
+- A left knee at (x=150, y=300) with confidence 0.67: [150, 300, 0.67].
 - The pose's detection confidence is 0.88.
 
 ### OpenPose
@@ -132,7 +116,7 @@ pose = {
 ```
 
 **Example:**
-- A right shoulder at (x=220, y=180) with confidence 0.55: `[220, 180, 0.55]`.
+- A right shoulder at (x=220, y=180) with confidence 0.55: [220, 180, 0.55].
 - The pose's average confidence is 0.62.
 
 ---
@@ -244,7 +228,7 @@ AmbientPose provides a robust mechanism for handling joint points with low confi
 
 For each joint in each frame, the following logic is applied:
 
-1. **If the joint's confidence is above the threshold** (`min_joint_confidence`, default 0.3):
+1. **If the joint's confidence is above the threshold** (min_joint_confidence, default 0.3):
     - The joint is accepted as-is.
 2. **If the joint's confidence is below the threshold:**
     - The system attempts to interpolate the joint's position using the same joint from previous and next frames (for the same person) **if both sides have high-confidence detections**.
@@ -276,9 +260,9 @@ For each joint in each frame:
 ### Formal Algorithm: Robust Filtering and Interpolation of Low-Confidence Joints
 
 **Input:**
-- For each frame \( f \) in a sequence \( F \), a set of detected poses \( P_f \).
-- For each pose \( p \in P_f \), a set of joints \( J_p = \{j_1, j_2, ..., j_n\} \), where each joint \( j_i \) is a tuple \((x, y, c)\) with coordinates \((x, y)\) and confidence \(c \in [0, 1]\).
-- A minimum joint confidence threshold \( \tau \) (e.g., 0.3).
+- For each frame $f$ in a sequence $F$, a set of detected poses $P_f$.
+- For each pose $p$ in $P_f$, a set of joints $J_p = \{ j_1, j_2, \ldots, j_n \}$, where each joint $j_i$ is a tuple $(x, y, c)$ with coordinates $(x, y)$ and confidence $c \in [0, 1]$.
+- A minimum joint confidence threshold $\tau$ (e.g., 0.3).
 - For each person, a mapping of joint histories across frames.
 
 **Output:**
@@ -288,44 +272,43 @@ For each joint in each frame:
 
 #### Pseudocode
 
-```text
-For each frame f in F:
-    For each pose p in P_f:
-        For each joint index i in 1..n:
-            (x, y, c) ← p.joints[i]
-            If (x == 0 and y == 0):
-                // Spurious or undetected joint, skip
-                Continue to next joint
+```
+for each frame f in F:
+    for each pose p in P_f:
+        for each joint index i in 1..n:
+            (x, y, c) = p.joints[i]
+            if x == 0 and y == 0:
+                continue  # skip undetected joint
 
-            If c ≥ τ:
-                // High-confidence joint, accept as-is
-                Output joint:
+            if c >= tau:
+                # High-confidence joint, accept as-is
+                output joint:
                     name: joint_name[i]
                     joint_id: i
                     keypoint: { x, y, confidence: c, interpolated: false, low_confidence: false }
-                Continue to next joint
+                continue
 
-            // Low-confidence joint, attempt interpolation
-            prev_kp ← Find most recent previous frame f_prev < f where
-                        person_id matches p and
-                        joint i has confidence ≥ τ
+            # Low-confidence joint, attempt interpolation
+            prev_kp = find most recent previous frame f_prev < f where
+                      person_id matches p and
+                      joint i has confidence >= tau
 
-            next_kp ← Find earliest next frame f_next > f where
-                        person_id matches p and
-                        joint i has confidence ≥ τ
+            next_kp = find earliest next frame f_next > f where
+                      person_id matches p and
+                      joint i has confidence >= tau
 
-            If prev_kp ≠ null and next_kp ≠ null:
-                // Both sides available, interpolate
-                x_interp ← (prev_kp.x + next_kp.x) / 2
-                y_interp ← (prev_kp.y + next_kp.y) / 2
-                c_interp ← min(prev_kp.confidence, next_kp.confidence)
-                Output joint:
+            if prev_kp is not None and next_kp is not None:
+                # Both sides available, interpolate
+                x_interp = (prev_kp.x + next_kp.x) / 2
+                y_interp = (prev_kp.y + next_kp.y) / 2
+                c_interp = min(prev_kp.confidence, next_kp.confidence)
+                output joint:
                     name: joint_name[i]
                     joint_id: i
                     keypoint: { x: x_interp, y: y_interp, confidence: c_interp, interpolated: true, low_confidence: false }
-            Else:
-                // Cannot interpolate, mark as low-confidence
-                Output joint:
+            else:
+                # Cannot interpolate, mark as low-confidence
+                output joint:
                     name: joint_name[i]
                     joint_id: i
                     keypoint: { x, y, confidence: c, interpolated: false, low_confidence: true }
@@ -333,14 +316,29 @@ For each frame f in F:
 
 ---
 
+**Interpolation Formulas:**
+
+```
+x_interp = (x_prev + x_next) / 2
+y_interp = (y_prev + y_next) / 2
+c_interp = min(c_prev, c_next)
+```
+
+Where:
+- $x_{\text{interp}}, y_{\text{interp}}$: interpolated coordinates for the joint
+- $x_{\text{prev}}, y_{\text{prev}}$: coordinates from the previous high-confidence frame
+- $x_{\text{next}}, y_{\text{next}}$: coordinates from the next high-confidence frame
+- $c_{\text{interp}}$: interpolated confidence (minimum of previous and next)
+- $c_{\text{prev}}, c_{\text{next}}$: confidence values from previous and next high-confidence frames
+
 **Algorithm Explanation**
 
 1. **High-Confidence Acceptance:**
-   - If a joint's confidence \( c \) meets or exceeds the threshold \( \tau \), it is accepted without modification.
-2. **Filtering of Spurious Joints:**
-   - Joints with coordinates \((0, 0)\) are considered undetected and are omitted from the output.
+   - If a joint's confidence $c$ meets or exceeds the threshold $\tau$, it is accepted without modification.
+2. **Filtering of Low-Confidence Joints:**
+   - Joints with coordinates (0, 0) are considered undetected and are omitted from the output.
 3. **Interpolation of Low-Confidence Joints:**
-   - For joints with \( c < \tau \), the algorithm searches for the same joint in both the most recent previous and earliest next frames (for the same person) where the joint's confidence is at least \( \tau \).
+   - For joints with $c < \tau$, the algorithm searches for the same joint in both the most recent previous and earliest next frames (for the same person) where the joint's confidence is at least $\tau$.
    - If both are found, the joint's position is linearly interpolated, and its confidence is set to the minimum of the two. The joint is marked as `interpolated: true`.
 4. **Low-Confidence Marking:**
    - If interpolation is not possible (i.e., one or both adjacent high-confidence joints are missing), the joint is retained but marked as `low_confidence: true`.
@@ -453,20 +451,12 @@ sequenceDiagram
 
 ---
 
-## Best Practices and Recommendations
+## Best Practices
 
 - **Set a reasonable confidence threshold** for the application (e.g., 0.3 for visualization, 0.5+ for analytics).
 - **Always filter out low-confidence joints** before using the data for downstream tasks.
 - **Interpolate missing joints** only if we have high-confidence values in adjacent frames.
 - **Document any changes** to the filtering/interpolation logic for reproducibility.
-
----
-
-## References
-- [MediaPipe Pose Documentation](https://google.github.io/mediapipe/solutions/pose.html)
-- [Ultralytics YOLOv8 Keypoints](https://docs.ultralytics.com/tasks/pose/)
-- [AlphaPose Documentation](https://github.com/MVIG-SJTU/AlphaPose)
-- [OpenPose Documentation](https://github.com/CMU-Perceptual-Computing-Lab/openpose)
 
 ---
 
