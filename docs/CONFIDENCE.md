@@ -140,14 +140,14 @@ pose = {
 ## Where Confidence is Used in the Code
 
 - **Detection filtering**: Each detector skips detections with pose confidence below `self.config.min_confidence`.
-- **Joint filtering**: By default, all joints are included, but you can filter out joints with low confidence (see next section).
+- **Joint filtering**: By default, all joints are included, but we filter out joints with low confidence (see next section).
 - **Output formatting**: In [`convert_pose_to_joints_format`](../cli/detect.py#L1753), joint and pose confidences are included in the output JSON.
 
 ---
 
 ## Filtering Low-Confidence Joints
 
-To remove all joint points with confidence below a threshold (e.g., 0.3), you should filter the `keypoints` list for each pose **after detection** and **before output**.
+To remove all joint points with confidence below a threshold (e.g., 0.3), we filter the `keypoints` list for each pose **after detection** and **before output**.
 
 ### Where to Add Filtering Logic
 
@@ -181,7 +181,7 @@ for i, joint_name in enumerate(joint_names):
 
 **To filter by confidence (e.g., 0.3):**
 ```python
-CONFIDENCE_THRESHOLD = 0.3  # Set your threshold here
+CONFIDENCE_THRESHOLD = 0.3  # Set threshold here
 ...
 for i, joint_name in enumerate(joint_names):
     if i < len(keypoints):
@@ -199,7 +199,7 @@ for i, joint_name in enumerate(joint_names):
 
 ### Example: Filtering and Interpolation
 
-Suppose you want to **interpolate missing joints** (those below the threshold) using values from adjacent frames, but only if those adjacent frames have confidence above the threshold.
+Suppose we want to **interpolate missing joints** (those below the threshold) using values from adjacent frames, but only if those adjacent frames have confidence above the threshold.
 
 #### Step 1: Store Previous/Next Keypoints
 - In the main processing loop (in `process_video` or `process_images`), keep a buffer of previous and next frames' keypoints for each person.
@@ -223,7 +223,7 @@ if confidence < CONFIDENCE_THRESHOLD:
 ```
 
 **Where to implement:**
-- You may need to extend the data structures in `PoseDetector` to keep a history of keypoints per person.
+- We should need to extend the data structures in `PoseDetector` to keep a history of keypoints per person.
 - Add helper functions to retrieve previous/next keypoints for interpolation.
 
 #### Example Scenario
@@ -378,9 +378,9 @@ sequenceDiagram
 
 ## Best Practices and Recommendations
 
-- **Set a reasonable confidence threshold** for your application (e.g., 0.3 for visualization, 0.5+ for analytics).
+- **Set a reasonable confidence threshold** for the application (e.g., 0.3 for visualization, 0.5+ for analytics).
 - **Always filter out low-confidence joints** before using the data for downstream tasks.
-- **Interpolate missing joints** only if you have high-confidence values in adjacent frames.
+- **Interpolate missing joints** only if we have high-confidence values in adjacent frames.
 - **Document any changes** to the filtering/interpolation logic for reproducibility.
 
 ---
