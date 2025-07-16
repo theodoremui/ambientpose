@@ -9,7 +9,7 @@ AmbientPose offers a production-ready CLI, an asynchronous FastAPI backend, and 
 
 ---
 
-## 1  Project Overview
+## 1.  Project Overview
 AmbientPose is designed for researchers, engineers, and creators to extract accurate multi-person, whole-body joint positions from media with minimal effort. It wraps state-of-the-art pose engines in a highly-extensible micro-service architecture, delivering:
 
 * **Batch & real-time inference** from the command line or REST/WebSocket API  
@@ -20,7 +20,7 @@ AmbientPose is designed for researchers, engineers, and creators to extract accu
 
 ---
 
-## 2  Key Features & Capabilities
+## 2.  Key Features & Capabilities
 | Area | Highlights |
 |------|------------|
 | **Detection Backends** | AlphaPose (full-body, 136 kp, tracking, GPU/CPU), MediaPipe (fast, CPU), Ultralytics YOLO (YOLOv8-pose) |
@@ -34,7 +34,7 @@ AmbientPose is designed for researchers, engineers, and creators to extract accu
 
 ---
 
-## 3  Supported Backends
+## 3.  Supported Backends
 AmbientPose supports multiple pose estimation engines, automatically selecting the best available or letting you choose:
 
 - **AlphaPose**: State-of-the-art, 136-keypoint, multi-person, tracking, best accuracy, GPU/CPU, optional 3D pose.
@@ -45,7 +45,7 @@ AmbientPose supports multiple pose estimation engines, automatically selecting t
 
 ---
 
-## 4  System Architecture
+## 4.  System Architecture
 
 ```
 ┌────────────┐  HTTPS/WS   ┌──────────────┐  asyncio/pipe   ┌─────────────┐
@@ -62,7 +62,7 @@ All artefacts live under `outputs/<taskId>/` for easy browsing and download.
 
 ---
 
-## 5  Quick-Start (Local)
+## 5.  Quick-Start (Local)
 
 ```bash
 git clone https://github.com/your-org/ambientpose.git
@@ -89,7 +89,7 @@ npm run dev --prefix frontend         # http://localhost:3000
 
 ---
 
-## 6  Usage Examples
+## 6.  Usage Examples
 
 ### CLI  
 
@@ -124,7 +124,7 @@ Swagger / Redoc automatically available at `http://localhost:8000/docs`.
 
 ---
 
-## 7  API Documentation
+## 7.  API Documentation
 
 * **Swagger / OpenAPI**: `GET /docs`  
 * **WebSocket**: `ws://<host>/ws/tasks/{taskId}` for live logs & status  
@@ -132,7 +132,7 @@ Swagger / Redoc automatically available at `http://localhost:8000/docs`.
 
 ---
 
-## 8  Frontend Highlights
+## 8.  Frontend Highlights
 
 * Responsive App-Router layout with breadcrumbs & dark mode  
 * Project dashboard, task monitor, overlay gallery & stats widgets  
@@ -143,7 +143,7 @@ See full design rationale in [`frontend/docs/DESIGN.md`](frontend/docs/DESIGN.md
 
 ---
 
-## 9  Extensibility & DevOps
+## 9.  Extensibility & DevOps
 
 - **Modular, typed Python code** (SOLID, plug-in detector architecture)
 - **Pre-commit hooks, CI-ready pytest suite, 90%+ test coverage**
@@ -156,7 +156,7 @@ See full design rationale in [`frontend/docs/DESIGN.md`](frontend/docs/DESIGN.md
 
 ---
 
-## 10  Deployment & Integration
+## 10.  Deployment & Integration
 
 - **Local, containerized, or cloud deployment**
 - **REST/WS API for integration with other systems**
@@ -165,7 +165,7 @@ See full design rationale in [`frontend/docs/DESIGN.md`](frontend/docs/DESIGN.md
 
 ---
 
-## 11  Contributing
+## 11.  Contributing
 
 We 💙 contributions!  Please:
 
@@ -178,22 +178,14 @@ Read `docs/CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` for details.
 
 ---
 
-## 12  License
+## 12.  License
 
 AmbientPose is licensed under the **MIT License** – see [`LICENSE`](LICENSE).  
 Note: AlphaPose models are released for **non-commercial research**; commercial usage may require separate permission from the original authors.
 
 ---
 
-## 13  Acknowledgments
-
-* **AlphaPose Team** – for the cutting-edge pose engine powering this project  
-* **FastAPI**, **Next.js**, **Tailwind CSS** – for their exceptional open-source tooling  
-
-> Made with passion by the AmbientPose engineering team.  
-> To contact the team, please send email to: Theodore Mui <theodoremui@gmail.com>
-
-## Running the Streamlit Frontend
+## 13. Running the Streamlit Frontend
 
 To launch the interactive pose detection frontend, use the following command from the project root:
 
@@ -213,3 +205,12 @@ streamlit run frontend/app.py
   ```sh
   streamlit --version
   ```
+
+---
+## 14.  Acknowledgments
+
+* Professor James Landay -- for his wise guidance and support
+* Institute of Human Centered AI
+
+> Made with passion by the AmbientPose engineering team.  
+> To contact the team, please send email to: Theodore Mui <theodoremui@gmail.com>
