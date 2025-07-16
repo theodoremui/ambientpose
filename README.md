@@ -49,7 +49,7 @@ AmbientPose supports multiple pose estimation engines, automatically selecting t
 
 ```
 ┌────────────┐  HTTPS/WS   ┌──────────────┐  asyncio/pipe   ┌─────────────┐
-│  Frontend  │◀──────────▶│   FastAPI    │◀──────────────▶│ detect.py   │
+│  Frontend  │◀───────────▶│   FastAPI    │◀───────────────▶│ detect.py   │
 │  Next.js   │             │    API       │   stdio/json    │ (AlphaPose/ │
 │            │             │              │                 │  MediaPipe/ │
 │            │             │              │                 │  YOLO)      │
