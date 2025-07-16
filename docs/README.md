@@ -1,5 +1,9 @@
 # AmbientPose – Whole-Body Pose Detection System
 
+> A project by Theodore Mui in collaboration with Shardul Sapkota
+> Ambient Intelligence Project in Stanford Institute for Human-centric AI
+> under the guidance of Professor James Landay.
+
 ## 1. Project Overview
 AmbientPose is an end-to-end, production-ready platform for extracting human joint positions from videos or image sequences.  
 Built on top of [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), it combines:
