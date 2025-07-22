@@ -123,7 +123,7 @@ class TestAmbientPoseConfigAdvanced:
             # Test Ultralytics defaults
             ultra_config = config.get_backend_config('ultralytics')
             assert ultra_config['net_resolution'] == '640x640'
-            assert ultra_config['model_pose'] == 'yolov8n-pose.pt'
+            assert ultra_config['model_pose'] == 'models/yolov8n-pose.pt'
             
             # Test OpenPose defaults
             op_config = config.get_backend_config('openpose')

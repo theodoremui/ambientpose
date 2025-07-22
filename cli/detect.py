@@ -95,8 +95,8 @@ except ImportError as e:
 
 # Check OpenPose availability
 try:
-    # Check if OPENPOSE_HOME environment variable is set
-    openpose_home = os.environ.get('OPENPOSE_HOME')
+    # Check if OPENPOSE_HOME or OPENPOSEPATH environment variable is set
+    openpose_home = os.environ.get('OPENPOSE_HOME') or os.environ.get('OPENPOSEPATH')
     if openpose_home:
         openpose_home_path = Path(openpose_home)
         openpose_bin_path = openpose_home_path / "bin"
@@ -151,7 +151,7 @@ try:
         else:
             logger.warning(f"OpenPose not available: bin directory not found at {openpose_bin_path}")
     else:
-        logger.warning("OpenPose not available: OPENPOSE_HOME environment variable not set")
+        logger.warning("OpenPose not available: OPENPOSE_HOME or OPENPOSEPATH environment variable not set")
         
 except Exception as e:
     OPENPOSE_AVAILABLE = False
@@ -183,7 +183,7 @@ class AmbientPoseConfig:
         },
         'ultralytics': {
             'net_resolution': '640x640',
-            'model_pose': 'yolov8n-pose.pt',
+            'model_pose': 'models/yolov8n-pose.pt',
         },
         'openpose': {
             'net_resolution': '656x368',
@@ -536,13 +536,17 @@ class MediaPipeDetector:
             cv2.putText(image, f'KP:{drawn_keypoints}', (x1, y1-30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
             
-            # Draw skeleton (only between valid keypoints)
+            # Draw skeleton (only between valid keypoints) - Simplified MediaPipe connections
             for connection in [
+                # Face and head connections
                 (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
-                (9, 10), (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
-                (17, 19), (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
-                (11, 23), (12, 24), (23, 24), (23, 25), (24, 26), (25, 27), (26, 28),
-                (27, 29), (28, 30), (29, 31), (30, 32), (27, 31), (28, 32)
+                (9, 10),  # Mouth connection
+                # Body connections
+                (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),  # Arms
+                (11, 23), (12, 24), (23, 24),  # Torso
+                (23, 25), (24, 26), (25, 27), (26, 28),  # Legs
+                # Simplified foot connections (removed excessive connections)
+                (27, 29), (27, 31), (28, 30), (28, 32)  # Basic ankle to foot connections
             ]:
                 pt1_idx, pt2_idx = connection
                 
@@ -565,13 +569,17 @@ class MediaPipeDetector:
     
     def _draw_landmarks(self, image: np.ndarray, landmarks: List) -> None:
         """Draw pose landmarks and connections."""
-        # MediaPipe pose connections
+        # MediaPipe pose connections - Simplified and anatomically correct
         connections = [
+            # Face and head connections
             (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
-            (9, 10), (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
-            (17, 19), (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
-            (11, 23), (12, 24), (23, 24), (23, 25), (24, 26), (25, 27), (26, 28),
-            (27, 29), (28, 30), (29, 31), (30, 32), (27, 31), (28, 32)
+            (9, 10),  # Mouth connection
+            # Body connections
+            (11, 12), (11, 13), (13, 15), (12, 14), (14, 16),  # Arms
+            (11, 23), (12, 24), (23, 24),  # Torso
+            (23, 25), (24, 26), (25, 27), (26, 28),  # Legs
+            # Simplified foot connections
+            (27, 29), (27, 31), (28, 30), (28, 32)  # Basic ankle to foot connections
         ]
         
         height, width = image.shape[:2]
@@ -607,10 +615,10 @@ class UltralyticsDetector:
         self.backend_config = config.get_backend_config('ultralytics')
         
         # Select model based on user preference or default
-        model_name = config.model_pose if config.model_pose else 'yolov8n-pose.pt'
+        model_name = config.model_pose if config.model_pose else 'models/yolov8n-pose.pt'
         
         # Validate and adjust model name for Ultralytics
-        valid_models = ['yolov8n-pose.pt', 'yolov8s-pose.pt', 'yolov8m-pose.pt', 'yolov8l-pose.pt', 'yolov8x-pose.pt']
+        valid_models = ['models/yolov8n-pose.pt', 'models/yolov8s-pose.pt', 'models/yolov8m-pose.pt', 'models/yolov8l-pose.pt', 'models/yolov8x-pose.pt']
         if model_name not in valid_models:
             if config.verbose:
                 logger.warning(f"Model '{model_name}' not in standard Ultralytics models: {valid_models}")
@@ -637,8 +645,8 @@ class UltralyticsDetector:
                 logger.info("Ultralytics YOLO pose detector initialized")
         except Exception as e:
             logger.warning(f"Failed to load model '{model_name}': {e}")
-            logger.info("Falling back to default yolov8n-pose.pt")
-            self.model = YOLO('yolov8n-pose.pt')
+            logger.info("Falling back to default models/yolov8n-pose.pt")
+            self.model = YOLO('models/yolov8n-pose.pt')
             logger.info("Ultralytics YOLO pose detector initialized with fallback model")
     
     def detect_poses(self, image: np.ndarray, frame_idx: int) -> List[Dict[str, Any]]:
@@ -1352,8 +1360,9 @@ class OpenPoseDetector:
         # Get backend-specific configuration
         self.backend_config = config.get_backend_config('openpose')
         
-        # Get OpenPose installation path
-        self.openpose_home = Path(os.environ.get('OPENPOSE_HOME', ''))
+        # Get OpenPose installation path (support both OPENPOSE_HOME and OPENPOSEPATH for compatibility)
+        openpose_path = os.environ.get('OPENPOSE_HOME') or os.environ.get('OPENPOSEPATH', '')
+        self.openpose_home = Path(openpose_path)
         self.openpose_bin_path = self.openpose_home / "bin"
         
         # Parse network resolution
@@ -1631,12 +1640,15 @@ class OpenPoseDetector:
         if not poses:
             return image
         
-        # OpenPose BODY_25 skeleton connections
+        # OpenPose BODY_25 skeleton connections - Fixed anatomically incorrect connections
         skeleton = [
             (1, 2), (1, 5), (2, 3), (3, 4), (5, 6), (6, 7),  # Head and arms
-            (1, 8), (8, 9), (9, 10), (1, 11), (11, 12), (12, 13),  # Torso and legs
-            (1, 0), (0, 14), (14, 16), (0, 15), (15, 17),  # Neck to face
-            (2, 16), (5, 17)  # Arms to ears
+            (1, 8), (8, 9), (9, 10), (10, 11), (8, 12), (12, 13), (13, 14),  # Torso and legs - Fixed
+            (1, 0), (0, 15), (15, 17), (0, 16), (16, 18),  # Neck to face - Fixed eye indices
+            # Removed anatomically incorrect (2, 16) and (5, 17) connections
+            # Added foot connections for BODY_25 model
+            (14, 19), (19, 20), (14, 21),  # Left foot connections
+            (11, 22), (22, 23), (11, 24)   # Right foot connections
         ]
         
         colors = [
@@ -1982,7 +1994,7 @@ class PoseDetector:
                 logger.error("❌ OpenPose backend requested but not available!")
                 logger.error("")
                 logger.error("🔧 To use OpenPose:")
-                logger.error("   1. Set OPENPOSE_HOME environment variable to your OpenPose installation directory")
+                logger.error("   1. Set OPENPOSE_HOME (or OPENPOSEPATH) environment variable to your OpenPose installation directory")
                 logger.error("   2. Ensure OpenPose binaries are in the bin/ subdirectory")
                 logger.error("   3. For optimal performance, compile OpenPose with Python bindings")
                 logger.error("")
@@ -2958,7 +2970,7 @@ def main() -> int:
             logger.error("Please install at least one of the following:")
             logger.error("  - MediaPipe: pip install mediapipe")
             logger.error("  - Ultralytics: pip install ultralytics")
-            logger.error("  - OpenPose: Set OPENPOSE_HOME environment variable")
+            logger.error("  - OpenPose: Set OPENPOSE_HOME (or OPENPOSEPATH) environment variable")
             logger.error("  - AlphaPose: Follow instructions in docs/INSTALL.md")
             return 1
         

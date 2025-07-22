@@ -17,7 +17,7 @@ if (-not (Test-Path cli/detect.py)) {
 }
 
 $backend = 'ultralytics'
-$model_pose = 'yolov8n-pose.pt'
+$model_pose = 'models/yolov8n-pose.pt'
 # $video_path = '../videos/OAW09-top.mp4'
 $video_path = 'data/video/video.avi'
 

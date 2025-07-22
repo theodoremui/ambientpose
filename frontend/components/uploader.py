@@ -7,10 +7,11 @@ import subprocess
 from .cli_utils import build_detect_cli_command
 
 class FileUploader:
-    # Backend-specific recommended defaults
+    # Backend-specific recommended defaults (matches CLI backend choices exactly)
     BACKEND_DEFAULTS = {
+        "auto": {"net_resolution": "auto", "model_pose": "auto"},
         "mediapipe": {"net_resolution": "256x256", "model_pose": "POSE_LANDMARKS"},
-        "ultralytics": {"net_resolution": "640x640", "model_pose": "yolov8n-pose.pt"},
+        "ultralytics": {"net_resolution": "640x640", "model_pose": "models/yolov8n-pose.pt"},
         "openpose": {"net_resolution": "656x368", "model_pose": "BODY_25"},
         "alphapose": {"net_resolution": "256x192", "model_pose": "COCO"},
     }
@@ -35,7 +36,7 @@ class FileUploader:
     def render_sidebar(cls):
         # Use Streamlit session state for sticky/auto-populated fields
         if 'backend' not in st.session_state:
-            st.session_state['backend'] = 'ultralytics'
+            st.session_state['backend'] = 'auto'
         if 'net_resolution' not in st.session_state:
             st.session_state['net_resolution'] = ""
         if 'model_pose' not in st.session_state:
@@ -43,36 +44,65 @@ class FileUploader:
         if 'output_dir' not in st.session_state:
             st.session_state['output_dir'] = "outputs"
 
-        # Backend selection
-        backend = st.selectbox("Select Backend", list(cls.BACKEND_DEFAULTS.keys()), key="backend")
-        cls.backend = backend
-        recommended = cls.BACKEND_DEFAULTS[backend]
+        # Backend selection with descriptions
+        backend_options = {
+            "auto": "Auto (best available)",
+            "mediapipe": "MediaPipe (fast & reliable)", 
+            "ultralytics": "Ultralytics YOLO (modern)",
+            "openpose": "OpenPose (high accuracy)",
+            "alphapose": "AlphaPose (research-grade)"
+        }
+        
+        backend_choice = st.selectbox(
+            "Select Backend", 
+            list(backend_options.keys()),
+            format_func=lambda x: backend_options[x],
+            key="backend"
+        )
+        cls.backend = backend_choice
+        recommended = cls.BACKEND_DEFAULTS[backend_choice]
 
         # If backend changed, update recommended values if user hasn't typed anything
-        if st.session_state.get('last_backend', None) != backend:
+        if st.session_state.get('last_backend', None) != backend_choice:
             if not st.session_state['net_resolution']:
                 st.session_state['net_resolution'] = recommended['net_resolution']
             if not st.session_state['model_pose']:
                 st.session_state['model_pose'] = recommended['model_pose']
-            st.session_state['last_backend'] = backend
+            st.session_state['last_backend'] = backend_choice
 
         # Detection/confidence sliders
         cls.min_confidence = st.slider("Minimum Detection Confidence", 0.0, 1.0, 0.5, 0.01, key="min_confidence")
         cls.min_joint_confidence = st.slider("Minimum Joint Confidence", 0.0, 1.0, 0.3, 0.01, key="min_joint_confidence")
 
         # Net resolution and model pose with recommended values
-        cls.net_resolution = st.text_input(
-            f"Network Resolution (recommended: {recommended['net_resolution']})",
-            value=st.session_state['net_resolution'],
-            key="net_resolution",
-            help=f"Recommended for {backend}: {recommended['net_resolution']}"
-        ) or None
-        cls.model_pose = st.text_input(
-            f"Model Pose (recommended: {recommended['model_pose']})",
-            value=st.session_state['model_pose'],
-            key="model_pose",
-            help=f"Recommended for {backend}: {recommended['model_pose']}"
-        ) or None
+        if backend_choice == "auto":
+            # For auto backend, show helpful message
+            cls.net_resolution = st.text_input(
+                "Network Resolution (auto-selected based on available backend)",
+                value=st.session_state['net_resolution'],
+                key="net_resolution",
+                help="Leave empty to use optimal resolution for automatically selected backend"
+            ) or None
+            cls.model_pose = st.text_input(
+                "Model Pose (auto-selected based on available backend)",
+                value=st.session_state['model_pose'],
+                key="model_pose",
+                help="Leave empty to use optimal model for automatically selected backend"
+            ) or None
+        else:
+            # For specific backends, show recommendations
+            cls.net_resolution = st.text_input(
+                f"Network Resolution (recommended: {recommended['net_resolution']})",
+                value=st.session_state['net_resolution'],
+                key="net_resolution",
+                help=f"Recommended for {backend_choice}: {recommended['net_resolution']}"
+            ) or None
+            cls.model_pose = st.text_input(
+                f"Model Pose (recommended: {recommended['model_pose']})",
+                value=st.session_state['model_pose'],
+                key="model_pose",
+                help=f"Recommended for {backend_choice}: {recommended['model_pose']}"
+            ) or None
 
         cls.overlay_video = st.text_input("Overlay Video Output Path", value="", key="overlay_video") or None
         cls.toronto_gait_format = st.checkbox("Output Toronto Gait Format", value=False, key="toronto_gait_format")
@@ -126,9 +156,10 @@ class FileUploader:
             cmd += ["--backend", backend]
         if cls.min_confidence is not None:
             cmd += ["--min-confidence", str(cls.min_confidence)]
-        if cls.net_resolution:
+        # Only pass net_resolution and model_pose if they're not "auto" (for auto backend)
+        if cls.net_resolution and cls.net_resolution != "auto":
             cmd += ["--net-resolution", cls.net_resolution]
-        if cls.model_pose:
+        if cls.model_pose and cls.model_pose != "auto":
             cmd += ["--model-pose", cls.model_pose]
         if overlay_video:
             cmd += ["--overlay-video", overlay_video]
@@ -146,7 +177,13 @@ class FileUploader:
 
     @classmethod
     def _handle_run_detection(cls):
-        st.info("Preparing to run detection...")
+        # Show which backend will be used
+        if cls.backend == "auto":
+            st.info("🔄 Preparing to run detection with auto-selected backend...")
+            st.info("💡 The system will automatically choose the best available backend (MediaPipe, Ultralytics, OpenPose, or AlphaPose)")
+        else:
+            st.info(f"🔄 Preparing to run detection with {cls.backend.upper()} backend...")
+        
         if cls.uploaded_file is None:
             st.error("No file uploaded.")
             return

@@ -31,9 +31,10 @@ def build_detect_cli_command(
         cmd += ["--backend", backend]
     if min_confidence is not None:
         cmd += ["--min-confidence", str(min_confidence)]
-    if net_resolution:
+    # Only pass net_resolution and model_pose if they're not "auto" (for auto backend)
+    if net_resolution and net_resolution != "auto":
         cmd += ["--net-resolution", net_resolution]
-    if model_pose:
+    if model_pose and model_pose != "auto":
         cmd += ["--model-pose", model_pose]
     if overlay_video:
         cmd += ["--overlay-video", overlay_video]

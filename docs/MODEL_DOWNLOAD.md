@@ -36,12 +36,12 @@ Ultralytics YOLO also downloads models automatically when first used.
 - ✅ High accuracy
 - ✅ GPU acceleration
 
-**Models downloaded automatically:**
-- `yolov8n-pose.pt` (~6MB) - Nano (fastest)
-- `yolov8s-pose.pt` (~22MB) - Small
-- `yolov8m-pose.pt` (~51MB) - Medium
-- `yolov8l-pose.pt` (~83MB) - Large
-- `yolov8x-pose.pt` (~139MB) - Extra Large (most accurate)
+**Models downloaded automatically (stored in `models/` directory):**
+- `models/yolov8n-pose.pt` (~6MB) - Nano (fastest)
+- `models/yolov8s-pose.pt` (~22MB) - Small
+- `models/yolov8m-pose.pt` (~51MB) - Medium
+- `models/yolov8l-pose.pt` (~83MB) - Large
+- `models/yolov8x-pose.pt` (~139MB) - Extra Large (most accurate)
 
 **Storage location (Windows):**
 - `C:\Users\{username}\.ultralytics\`

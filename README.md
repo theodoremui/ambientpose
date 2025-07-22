@@ -1,10 +1,10 @@
 # AmbientPose
 
 > A project by Theodore Mui in collaboration with Shardul Sapkota
-> Ambient Intelligence Project in Stanford Institute for Human-centric AI
-> under the guidance of Professor James Landay.
+> and the Stanford University for Human-Centered AI (HAI) Ambient Intelligence Lab,
+> under the guidance of Professor James Landay
 
-**Modern end-to-end human-pose detection platform powered by [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), MediaPipe, and Ultralytics YOLO.**  
+**Modern end-to-end human-pose detection platform powered by [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose), MediaPipe, and Ultralytics YOLO.**  
 AmbientPose offers a production-ready CLI, an asynchronous FastAPI backend, and a sleek Next.js/Tailwind frontend that work together to transform videos or image sequences into rich pose-estimation data and visualisations.
 
 ---
@@ -23,7 +23,7 @@ AmbientPose is designed for researchers, engineers, and creators to extract accu
 ## 2  Key Features & Capabilities
 | Area | Highlights |
 |------|------------|
-| **Detection Backends** | AlphaPose (full-body, 136 kp, tracking, GPU/CPU), MediaPipe (fast, CPU), Ultralytics YOLO (YOLOv8-pose) |
+| **Detection Backends** | AlphaPose (full-body, 136 kp, tracking, GPU/CPU), OpenPose (industry standard, BODY_25/COCO models, GPU/CPU), MediaPipe (fast, CPU), Ultralytics YOLO (YOLOv8-pose) |
 | **Inputs** | Local videos, image folders, or remote URLs |
 | **Outputs** | Pose JSON · `frames_*` raw dumps · `overlay_*` annotated frames · CSV export |
 | **API** | Async FastAPI, Swagger/OpenAPI, WebSocket log/progress streaming, task queue, cancellation |
@@ -38,6 +38,7 @@ AmbientPose is designed for researchers, engineers, and creators to extract accu
 AmbientPose supports multiple pose estimation engines, automatically selecting the best available or letting you choose:
 
 - **AlphaPose**: State-of-the-art, 136-keypoint, multi-person, tracking, best accuracy, GPU/CPU, optional 3D pose.
+- **OpenPose**: Industry-standard pose estimation, BODY_25/COCO/MPI models, real-time performance, GPU/CPU support.
 - **MediaPipe**: Fast, reliable, CPU-friendly, ideal for quick or resource-limited jobs.
 - **Ultralytics YOLO**: YOLOv8-pose, fast, alternative backend for pose estimation.
 
@@ -51,6 +52,7 @@ AmbientPose supports multiple pose estimation engines, automatically selecting t
 ┌────────────┐  HTTPS/WS   ┌──────────────┐  asyncio/pipe   ┌─────────────┐
 │  Frontend  │◀──────────▶│   FastAPI    │◀──────────────▶│ detect.py   │
 │  Next.js   │             │    API       │   stdio/json    │ (AlphaPose/ │
+│            │             │              │                 │  OpenPose/  │
 │            │             │              │                 │  MediaPipe/ │
 │            │             │              │                 │  YOLO)      │
 └────────────┘             └──────────────┘                 └─────────────┘
@@ -82,7 +84,11 @@ uv pip install "alphapose @ git+https://github.com/MVIG-SJTU/AlphaPose"
 # ④ Download AlphaPose weights (≈200 MB)
 make download-models                  # or see docs/INSTALL.md
 
-# ⑤ Run services
+# ⑤ Optional: Setup OpenPose (if using OpenPose backend)
+# Set OPENPOSE_HOME environment variable to your OpenPose installation
+# See docs/OPENPOSE_SETUP.md for detailed instructions
+
+# ⑥ Run services
 uvicorn server.app:app --reload       # http://localhost:8000
 npm run dev --prefix frontend         # http://localhost:3000
 ```
@@ -99,6 +105,9 @@ python cli/detect.py --video demo.mp4 --backend alphapose
 
 # Image folder with explicit output file
 python cli/detect.py --image-dir samples/frames --output outputs/pose_run1.json --backend mediapipe
+
+# Use OpenPose backend
+python cli/detect.py --video demo.mp4 --backend openpose
 
 # Use YOLO backend
 python cli/detect.py --video demo.mp4 --backend ultralytics
