@@ -17,7 +17,7 @@ class FileUploader:
     }
     # Store parameters as class variables for cross-method access
     uploaded_file = None
-    backend = "ultralytics"
+    backend = "mediapipe"
     min_confidence = 0.5
     min_joint_confidence = 0.5
     net_resolution = None
@@ -36,7 +36,11 @@ class FileUploader:
     def render_sidebar(cls):
         # Use Streamlit session state for sticky/auto-populated fields
         if 'backend' not in st.session_state:
+<<<<<<< HEAD
             st.session_state['backend'] = 'auto'
+=======
+            st.session_state['backend'] = 'mediapipe'
+>>>>>>> a24fe713f72f46b449716d9c0ec932cc42d2a70b
         if 'net_resolution' not in st.session_state:
             st.session_state['net_resolution'] = ""
         if 'model_pose' not in st.session_state:
@@ -141,6 +145,14 @@ class FileUploader:
         output_json = os.path.join(run_folder, f"pose_{input_name}_{backend}_{timestamp}.json")
         # Only use overlay_video if user specified it in the sidebar
         overlay_video = cls.overlay_video if cls.overlay_video else None
+        # Ensure overlay_video ends with '_overlay.mp4' if set
+        if overlay_video and not overlay_video.endswith("_overlay.mp4"):
+            base, ext = os.path.splitext(overlay_video)
+            if ext.lower() != ".mp4":
+                ext = ".mp4"
+            if not base.endswith("_overlay"):
+                base = base.rstrip(".mp4") + "_overlay"
+            overlay_video = base + ext
         # Build the command directly to ensure correct input flag
         import sys
         cmd = [sys.executable, "cli/detect.py"]

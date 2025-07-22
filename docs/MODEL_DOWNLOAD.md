@@ -4,11 +4,12 @@ This guide covers how to download and set up pretrained models for all pose dete
 
 ## 📋 Overview
 
-AmbientPose supports three backends, each with different model requirements:
+AmbientPose supports four backends, each with different model requirements:
 
 - **MediaPipe**: Automatic download (no setup required)
 - **Ultralytics YOLO**: Automatic download (no setup required)
 - **AlphaPose**: Manual download required
+- **OpenPose**: Manual download required
 
 ## 🤖 MediaPipe Models (Automatic)
 
