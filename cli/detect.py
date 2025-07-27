@@ -1377,13 +1377,13 @@ class OpenPoseDetector:
                 logger.warning(f"Invalid net-resolution for OpenPose: {config.net_resolution}, using default")
         
         # Parse pose model
-        self.pose_model = config.model_pose if config.model_pose else 'BODY_25'
+        self.pose_model = config.model_pose if config.model_pose else 'COCO'
         valid_models = ['COCO', 'BODY_25', 'MPI', 'MPI_4_layers']
         if self.pose_model not in valid_models:
             if config.verbose:
                 logger.warning(f"Model '{self.pose_model}' not in valid OpenPose models: {valid_models}")
-                logger.info(f"Falling back to BODY_25")
-            self.pose_model = 'BODY_25'
+                logger.info(f"Falling back to COCO")
+            self.pose_model = 'COCO'
         
         # Initialize OpenPose
         self._init_openpose()
@@ -1830,26 +1830,25 @@ class PersonTracker:
 
 
 def get_coco_joint_names() -> List[str]:
-    """Get COCO joint names in order."""
+    """Get COCO joint names in order matching Toronto dataset format."""
     return [
-        "nose",           # 0
-        "left_eye",       # 1  
-        "right_eye",      # 2
-        "left_ear",       # 3
-        "right_ear",      # 4
-        "left_shoulder",  # 5
-        "right_shoulder", # 6
-        "left_elbow",     # 7
-        "right_elbow",    # 8
-        "left_wrist",     # 9
-        "right_wrist",    # 10
-        "left_hip",       # 11
-        "right_hip",      # 12
-        "left_knee",      # 13
-        "right_knee",     # 14
-        "left_ankle",     # 15
-        "right_ankle",    # 16
-        "joint_17"        # 17 (additional joint from example)
+        "Nose",           # 0
+        "LEye",           # 1  
+        "REye",           # 2
+        "LEar",           # 3
+        "REar",           # 4
+        "LShoulder",      # 5
+        "RShoulder",      # 6
+        "LElbow",         # 7
+        "RElbow",         # 8
+        "LWrist",         # 9
+        "RWrist",         # 10
+        "LHip",           # 11
+        "RHip",           # 12
+        "LKnee",          # 13
+        "RKnee",          # 14
+        "LAnkle",         # 15
+        "RAnkle"          # 16
     ]
 
 
@@ -2350,7 +2349,7 @@ class PoseDetector:
             model_pose = "COCO"
             net_resolution = "640x640"  # YOLOv8 default
         elif self.backend_name == "openpose":
-            model_pose = "BODY_25"  # OpenPose uses BODY_25 format
+            model_pose = "COCO"  # OpenPose now uses COCO format by default
             net_resolution = "656x368"  # OpenPose default resolution
         else:  # mediapipe
             model_pose = "COCO"
@@ -2665,6 +2664,78 @@ class PoseDetector:
         
         logger.success(f"Toronto gait format saved: {len(gait_analysis)} people analyzed")
         logger.success(f"Toronto gait output: {toronto_path}")
+    
+    def save_toronto_csv_format(self, poses: List[Dict[str, Any]]) -> None:
+        """Save pose detection results in exact Toronto dataset CSV format."""
+        # Generate Toronto CSV filename in run output dir
+        toronto_csv_filename = "toronto_gait.csv"
+        toronto_csv_path = self.config.run_output_dir / toronto_csv_filename
+        
+        logger.info(f"Saving Toronto CSV format to {toronto_csv_path}")
+        
+        # Get joint names in Toronto format
+        joint_names = get_coco_joint_names()
+        
+        # Create CSV header matching Toronto format exactly
+        header_parts = ["time"]
+        for joint_name in joint_names:
+            header_parts.extend([f"{joint_name}_x", f"{joint_name}_y", f"{joint_name}_conf"])
+        
+        header = ",".join(header_parts)
+        
+        # Prepare CSV data
+        csv_rows = [header]
+        
+        # Group poses by frame number
+        frame_poses = {}
+        for pose in self.all_converted_poses:
+            frame_number = pose['frame_number']
+            if frame_number not in frame_poses:
+                frame_poses[frame_number] = []
+            frame_poses[frame_number].append(pose)
+        
+        # Process each frame
+        for frame_number in sorted(frame_poses.keys()):
+            frame_poses_list = frame_poses[frame_number]
+            
+            # Use the first person detected in the frame (or combine if needed)
+            if frame_poses_list:
+                pose = frame_poses_list[0]  # Take first person
+                timestamp = pose['timestamp']
+                
+                # Create row data
+                row_parts = [str(timestamp)]
+                
+                # Create joint data dictionary for easy lookup
+                joint_data = {}
+                for joint in pose['joints']:
+                    joint_data[joint['name']] = {
+                        'x': joint['keypoint']['x'],
+                        'y': joint['keypoint']['y'],
+                        'confidence': joint['keypoint']['confidence']
+                    }
+                
+                # Add joint data in order
+                for joint_name in joint_names:
+                    if joint_name in joint_data:
+                        joint = joint_data[joint_name]
+                        row_parts.extend([
+                            str(joint['x']),
+                            str(joint['y']),
+                            str(joint['confidence'])
+                        ])
+                    else:
+                        # Fill with zeros if joint not detected
+                        row_parts.extend(['0.0', '0.0', '0.0'])
+                
+                csv_rows.append(",".join(row_parts))
+        
+        # Write CSV file
+        with open(toronto_csv_path, 'w', newline='') as f:
+            f.write('\n'.join(csv_rows))
+        
+        logger.success(f"Toronto CSV format saved: {len(csv_rows)-1} frames")
+        logger.success(f"Toronto CSV output: {toronto_csv_path}")
     
     def _extract_comprehensive_frame_data(self, frame: np.ndarray, frame_idx: int, timestamp: float, poses: List[Dict[str, Any]]) -> None:
         """Extract comprehensive frame analysis data."""
@@ -2993,6 +3064,7 @@ def main() -> int:
         # Save Toronto gait format if requested
         if config.toronto_gait_format:
             detector.save_toronto_gait_format(poses)
+            detector.save_toronto_csv_format(poses)
         
         # Save comprehensive frame analysis if requested
         if config.extract_comprehensive_frames:
@@ -3010,7 +3082,9 @@ def main() -> int:
             logger.success(f"Overlay video saved to: {config.overlay_video_path}")
         if config.toronto_gait_format:
             toronto_path = config.output_json.parent / (config.output_json.stem + "_toronto_gait.json")
+            toronto_csv_path = config.output_json.parent / "toronto_gait.csv"
             logger.success(f"Toronto gait analysis saved to: {toronto_path}")
+            logger.success(f"Toronto CSV format saved to: {toronto_csv_path}")
         if config.extract_comprehensive_frames:
             analysis_path = config.output_json.parent / (config.output_json.stem + "_comprehensive_frames.json")
             logger.success(f"Comprehensive frame analysis saved to: {analysis_path}")

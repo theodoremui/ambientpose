@@ -36,11 +36,7 @@ class FileUploader:
     def render_sidebar(cls):
         # Use Streamlit session state for sticky/auto-populated fields
         if 'backend' not in st.session_state:
-<<<<<<< HEAD
             st.session_state['backend'] = 'auto'
-=======
-            st.session_state['backend'] = 'mediapipe'
->>>>>>> a24fe713f72f46b449716d9c0ec932cc42d2a70b
         if 'net_resolution' not in st.session_state:
             st.session_state['net_resolution'] = ""
         if 'model_pose' not in st.session_state:

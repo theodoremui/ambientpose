@@ -1,5 +1,5 @@
 data/*
-outputs/*
+# outputs/*
 **/*.db
 **/*.pt
 
@@ -29,10 +29,9 @@ data/*
 **/*.mp4
 *.mp3
 **/*.mp3
-*.csv
-**/*.csv
+# *.csv
+# **/*.csv
 
-outputs/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
