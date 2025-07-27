@@ -1,11 +1,9 @@
-data/*
-# outputs/*
+models
+models/*
+outputs
+outputs/*
 **/*.db
 **/*.pt
-
-AlphaPose/
-AlphaPose/*
-
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -19,9 +17,6 @@ wheels/
 
 debug
 debug/*
-
-data
-data/*
 
 *.avi
 **/*.avi
@@ -165,6 +160,3 @@ dmypy.json
 
 .DS_Store
 .DS_Store/
-
-AlphaPose
-AlphaPose
