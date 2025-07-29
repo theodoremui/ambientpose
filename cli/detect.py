@@ -28,6 +28,9 @@ import cv2
 import numpy as np
 from loguru import logger
 
+# Import person selection utilities
+from .person_selection import create_person_selector, filter_gait_data_by_person
+
 # Add AlphaPose to Python path if it exists
 alphapose_path = Path(__file__).parent.parent / "AlphaPose"
 if alphapose_path.exists():
@@ -250,6 +253,10 @@ class AmbientPoseConfig:
         self.toronto_gait_format: bool = args.toronto_gait_format
         self.extract_comprehensive_frames: bool = args.extract_comprehensive_frames
         self.verbose: bool = args.verbose
+        
+        # Person selection configuration
+        self.person_selection: str = args.person_selection
+        self.min_frames_for_selection: int = args.min_frames_for_selection
         
         # Set up logging based on debug and verbose flags
         self._setup_logging()
@@ -2518,7 +2525,54 @@ class PoseDetector:
                     'confidence': joint['keypoint']['confidence']
                 }
         
-        # Calculate gait metrics for each person
+        # Add bounding box information to gait_data for person selection heuristics
+        # We need to access the original pose data to get bounding boxes
+        original_poses_by_person = {}
+        for pose in self.all_converted_poses:
+            person_id = pose['person_id']
+            frame_number = pose['frame_number']
+            
+            # Find the corresponding original pose with bounding box
+            for original_pose in poses:
+                if (original_pose.get('person_id') == person_id and 
+                    original_pose.get('frame_idx') == frame_number):
+                    if person_id not in original_poses_by_person:
+                        original_poses_by_person[person_id] = {}
+                    original_poses_by_person[person_id][frame_number] = original_pose
+                    break
+        
+        # Add bounding box information to gait_data
+        for person_id, person_frames in gait_data.items():
+            for frame_number, frame_data in person_frames.items():
+                if (person_id in original_poses_by_person and 
+                    frame_number in original_poses_by_person[person_id]):
+                    original_pose = original_poses_by_person[person_id][frame_number]
+                    if 'bbox' in original_pose:
+                        frame_data['bbox'] = original_pose['bbox']
+        
+        # Apply person selection if enabled
+        main_person_id = None
+        if self.config.person_selection != 'none':
+            try:
+                # Create person selector
+                person_selector = create_person_selector(
+                    heuristic=self.config.person_selection,
+                    min_frames=self.config.min_frames_for_selection
+                )
+                
+                # Select main person
+                main_person_id = person_selector.select_main_person(gait_data)
+                
+                if main_person_id is not None:
+                    logger.info(f"Selected main person {main_person_id} using {self.config.person_selection} heuristic")
+                    # Filter gait data to include only the main person
+                    gait_data = filter_gait_data_by_person(gait_data, main_person_id)
+                else:
+                    logger.warning(f"No valid person found with {self.config.person_selection} heuristic, processing all people")
+            except Exception as e:
+                logger.error(f"Person selection failed: {e}, processing all people")
+        
+        # Calculate gait metrics for each person (now filtered if selection was applied)
         gait_analysis = []
         for person_id, person_data in gait_data.items():
             frames = sorted(person_data.keys())
@@ -2694,21 +2748,90 @@ class PoseDetector:
                 frame_poses[frame_number] = []
             frame_poses[frame_number].append(pose)
         
+        # Apply person selection if enabled
+        main_person_id = None
+        if self.config.person_selection != 'none':
+            try:
+                # Create person selector
+                person_selector = create_person_selector(
+                    heuristic=self.config.person_selection,
+                    min_frames=self.config.min_frames_for_selection
+                )
+                
+                # Build gait data for selection with bounding box information
+                selection_gait_data = {}
+                for pose in self.all_converted_poses:
+                    person_id = pose['person_id']
+                    frame_number = pose['frame_number']
+                    if person_id not in selection_gait_data:
+                        selection_gait_data[person_id] = {}
+                    selection_gait_data[person_id][frame_number] = pose
+                
+                # Add bounding box information to selection_gait_data
+                original_poses_by_person = {}
+                for pose in self.all_converted_poses:
+                    person_id = pose['person_id']
+                    frame_number = pose['frame_number']
+                    
+                    # Find the corresponding original pose with bounding box
+                    for original_pose in poses:
+                        if (original_pose.get('person_id') == person_id and 
+                            original_pose.get('frame_idx') == frame_number):
+                            if person_id not in original_poses_by_person:
+                                original_poses_by_person[person_id] = {}
+                            original_poses_by_person[person_id][frame_number] = original_pose
+                            break
+                
+                # Add bounding box information to selection_gait_data
+                for person_id, person_frames in selection_gait_data.items():
+                    for frame_number, frame_data in person_frames.items():
+                        if (person_id in original_poses_by_person and 
+                            frame_number in original_poses_by_person[person_id]):
+                            original_pose = original_poses_by_person[person_id][frame_number]
+                            if 'bbox' in original_pose:
+                                frame_data['bbox'] = original_pose['bbox']
+                
+                # Select main person
+                main_person_id = person_selector.select_main_person(selection_gait_data)
+                
+                if main_person_id is not None:
+                    logger.info(f"Selected main person {main_person_id} for CSV output using {self.config.person_selection} heuristic")
+                else:
+                    logger.warning(f"No valid person found with {self.config.person_selection} heuristic for CSV, using first person per frame")
+            except Exception as e:
+                logger.error(f"Person selection failed for CSV: {e}, using first person per frame")
+        
         # Process each frame
         for frame_number in sorted(frame_poses.keys()):
             frame_poses_list = frame_poses[frame_number]
             
-            # Use the first person detected in the frame (or combine if needed)
+            # Select the appropriate person for this frame
+            selected_pose = None
             if frame_poses_list:
-                pose = frame_poses_list[0]  # Take first person
-                timestamp = pose['timestamp']
+                if main_person_id is not None:
+                    # Try to find the main person in this frame
+                    for pose in frame_poses_list:
+                        if pose.get('person_id') == main_person_id:
+                            selected_pose = pose
+                            break
+                    
+                    # If main person not found in this frame, use first person
+                    if selected_pose is None:
+                        selected_pose = frame_poses_list[0]
+                        logger.debug(f"Main person {main_person_id} not found in frame {frame_number}, using first person")
+                else:
+                    # Use the first person detected in the frame
+                    selected_pose = frame_poses_list[0]
+            
+            if selected_pose:
+                timestamp = selected_pose['timestamp']
                 
                 # Create row data
                 row_parts = [str(timestamp)]
                 
                 # Create joint data dictionary for easy lookup
                 joint_data = {}
-                for joint in pose['joints']:
+                for joint in selected_pose['joints']:
                     joint_data[joint['name']] = {
                         'x': joint['keypoint']['x'],
                         'y': joint['keypoint']['y'],
@@ -3006,6 +3129,14 @@ def parse_args() -> argparse.Namespace:
     # Add minimum joint confidence argument
     parser.add_argument('--min-joint-confidence', type=float, default=0.3,
                         help='Minimum confidence for individual joint points (default: 0.3). Joints below this will be filtered/interpolated.')
+    
+    # Person selection options
+    parser.add_argument('--person-selection', type=str, default='longest_track',
+                        choices=['longest_track', 'largest_bbox', 'most_central', 'none'],
+                        help='Person selection heuristic for gait analysis (default: longest_track)')
+    parser.add_argument('--min-frames-for-selection', type=int, default=10,
+                        help='Minimum frames required for person selection (default: 10)')
+    
     return parser.parse_args()
 
 
