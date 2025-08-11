@@ -2,7 +2,7 @@
 
 > A project by <b>Theodore Mui</b> in collaboration with <b>Shardul Sapkota</b>
 > and the Stanford University for Human-Centered AI (HAI) Ambient Intelligence Lab,
-> under the guidance of Professor James Landay
+> under the guidance of <b>Professor James Landay</b>
 
 **Modern end-to-end human-pose detection platform powered by [AlphaPose](https://github.com/MVIG-SJTU/AlphaPose), [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose), MediaPipe, and Ultralytics YOLO.**  
 AmbientPose offers a production-ready CLI, an asynchronous FastAPI backend, and a sleek Next.js/Tailwind frontend that work together to transform videos or image sequences into rich pose-estimation data and visualisations.
