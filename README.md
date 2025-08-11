@@ -1,6 +1,6 @@
 # AmbientPose
 
-> A project by Theodore Mui in collaboration with Shardul Sapkota
+> A project by <b>Theodore Mui</b> in collaboration with <b>Shardul Sapkota</b>
 > and the Stanford University for Human-Centered AI (HAI) Ambient Intelligence Lab,
 > under the guidance of Professor James Landay
 
